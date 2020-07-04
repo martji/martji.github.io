@@ -20,28 +20,31 @@
     var CONFIG = {"hostname":"yoursite.com","root":"/","scheme":"Pisces","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
   </script>
 
-  <meta property="og:type" content="website">
-<meta property="og:title" content="George Ma">
-<meta property="og:url" content="http://yoursite.com/index.html">
+  <meta property="og:type" content="article">
+<meta property="og:title" content="一条SQL的执行过程">
+<meta property="og:url" content="http://yoursite.com/2020/07/04/sql-execute/index.html">
 <meta property="og:site_name" content="George Ma">
 <meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2020-07-04T11:22:11.000Z">
+<meta property="article:modified_time" content="2020-07-04T11:38:28.641Z">
 <meta property="article:author" content="magq1001@gmail.com">
+<meta property="article:tag" content="数据库">
 <meta name="twitter:card" content="summary">
 
-<link rel="canonical" href="http://yoursite.com/">
+<link rel="canonical" href="http://yoursite.com/2020/07/04/sql-execute/">
 
 
 <script id="page-configurations">
   // https://hexo.io/docs/variables.html
   CONFIG.page = {
     sidebar: "",
-    isHome : true,
-    isPost : false,
+    isHome : false,
+    isPost : true,
     lang   : 'zh-CN'
   };
 </script>
 
-  <title>George Ma</title>
+  <title>一条SQL的执行过程 | George Ma</title>
   
 
 
@@ -151,9 +154,10 @@
         <div class="content-wrap">
           
 
-          <div class="content index posts-expand">
+          <div class="content post posts-expand">
             
-      
+
+    
   
   
   <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
@@ -169,10 +173,9 @@
       <meta itemprop="name" content="George Ma">
     </span>
       <header class="post-header">
-        <h2 class="post-title" itemprop="name headline">
-          
-            <a href="/2020/07/04/sql-execute/" class="post-title-link" itemprop="url">一条SQL的执行过程</a>
-        </h2>
+        <h1 class="post-title" itemprop="name headline">
+          一条SQL的执行过程
+        </h1>
 
         <div class="post-meta">
             <span class="post-meta-item">
@@ -195,65 +198,14 @@
             </span>
 
           
-
-        </div>
-      </header>
-
-    
-    
-    
-    <div class="post-body" itemprop="articleBody">
-
-      
-          
-      
-    </div>
-
-    
-    
-    
-      <footer class="post-footer">
-        <div class="post-eof"></div>
-      </footer>
-  </article>
-  
-  
-  
-
-      
-  
-  
-  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
-    <link itemprop="mainEntityOfPage" href="http://yoursite.com/2020/07/04/menu/">
-
-    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
-      <meta itemprop="image" content="/images/avatar.jpg">
-      <meta itemprop="name" content="magq1001@gmail.com">
-      <meta itemprop="description" content="">
-    </span>
-
-    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
-      <meta itemprop="name" content="George Ma">
-    </span>
-      <header class="post-header">
-        <h2 class="post-title" itemprop="name headline">
-          
-            <a href="/2020/07/04/menu/" class="post-title-link" itemprop="url">总(Li)体(Xia)说明(Flag)</a>
-        </h2>
-
-        <div class="post-meta">
-            <span class="post-meta-item">
+            <span class="post-meta-item" title="阅读次数" id="busuanzi_container_page_pv" style="display: none;">
               <span class="post-meta-item-icon">
-                <i class="far fa-calendar"></i>
+                <i class="fa fa-eye"></i>
               </span>
-              <span class="post-meta-item-text">发表于</span>
-              
-
-              <time title="创建时间：2020-07-04 12:06:18 / 修改时间：19:38:33" itemprop="dateCreated datePublished" datetime="2020-07-04T12:06:18+08:00">2020-07-04</time>
+              <span class="post-meta-item-text">阅读次数：</span>
+              <span id="busuanzi_value_page_pv"></span>
             </span>
 
-          
-
         </div>
       </header>
 
@@ -263,40 +215,34 @@
     <div class="post-body" itemprop="articleBody">
 
       
-          <p>声明：本文档仅作为个人学习过程中的总结与归纳，如果存在错误或者不严谨的描述，欢迎拍砖。</p>
-<h2 id="整体说明"><a href="#整体说明" class="headerlink" title="整体说明"></a>整体说明</h2><p>整个文档包括但是不限于以下内容：</p>
-<ul>
-<li>数据库管理系统 (DataBase Management System)</li>
-<li>分布式系统 (Distributed System)</li>
-<li>操作系统 (Operating System)</li>
-<li>网络与并行处理 (Network and Parallel Processing)</li>
-<li>编程语言 (Program Language)</li>
-<li>算法与数据结构 (Algorithm and Data Structure)</li>
-<li>其它 (Others)</li>
-</ul>
-          <!--noindex-->
-            <div class="post-button">
-              <a class="btn" href="/2020/07/04/menu/#more" rel="contents">
-                阅读全文 &raquo;
-              </a>
-            </div>
-          <!--/noindex-->
         
-      
     </div>
 
     
     
     
+
       <footer class="post-footer">
-        <div class="post-eof"></div>
+          <div class="post-tags">
+              <a href="/tags/%E6%95%B0%E6%8D%AE%E5%BA%93/" rel="tag"># 数据库</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/07/04/menu/" rel="prev" title="总(Li)体(Xia)说明(Flag)">
+      <i class="fa fa-chevron-left"></i> 总(Li)体(Xia)说明(Flag)
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
       </footer>
+    
   </article>
   
   
-  
-
-
   
 
 
