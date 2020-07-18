@@ -17,18 +17,18 @@
 
 <script id="hexo-configurations">
     var NexT = window.NexT || {};
-    var CONFIG = {"hostname":"yoursite.com","root":"/","scheme":"Pisces","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+    var CONFIG = {"hostname":"yoursite.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
   </script>
 
-  <meta name="description" content="提到数据库，相信很多人第一个想到的就是事务，今天就从事务开始，对数据库的基本特征以及背后的实现逻辑进行一个简单的说明。 事务在写这篇文章的时候，笔者特意又重新查了下事务的定义。维基百科中关于事务的定义是：“事务是数据库系统执行过程中的一个逻辑单位，由一个有限的数据库操作序列构成”。事务的概念本身并没有什么好展开的，事务之所以成为数据库系统最重要的特征之一，是因为事务的 ACID 属性。">
+  <meta name="description" content="提到数据库，相信很多人第一个想到的就是事务，今天就从事务开始，对数据库的基本特征以及背后的实现逻辑进行一个简单的说明。">
 <meta property="og:type" content="article">
 <meta property="og:title" content="初识事务">
 <meta property="og:url" content="http://yoursite.com/2020/07/13/transaction-intro/index.html">
 <meta property="og:site_name" content="George Ma">
-<meta property="og:description" content="提到数据库，相信很多人第一个想到的就是事务，今天就从事务开始，对数据库的基本特征以及背后的实现逻辑进行一个简单的说明。 事务在写这篇文章的时候，笔者特意又重新查了下事务的定义。维基百科中关于事务的定义是：“事务是数据库系统执行过程中的一个逻辑单位，由一个有限的数据库操作序列构成”。事务的概念本身并没有什么好展开的，事务之所以成为数据库系统最重要的特征之一，是因为事务的 ACID 属性。">
+<meta property="og:description" content="提到数据库，相信很多人第一个想到的就是事务，今天就从事务开始，对数据库的基本特征以及背后的实现逻辑进行一个简单的说明。">
 <meta property="og:locale" content="zh_CN">
 <meta property="article:published_time" content="2020-07-13T15:03:15.000Z">
-<meta property="article:modified_time" content="2020-07-14T14:53:11.518Z">
+<meta property="article:modified_time" content="2020-07-17T14:46:50.902Z">
 <meta property="article:author" content="magq1001@gmail.com">
 <meta property="article:tag" content="事务">
 <meta name="twitter:card" content="summary">
@@ -193,7 +193,7 @@
                   <i class="far fa-calendar-check"></i>
                 </span>
                 <span class="post-meta-item-text">更新于</span>
-                <time title="修改时间：2020-07-14 22:53:11" itemprop="dateModified" datetime="2020-07-14T22:53:11+08:00">2020-07-14</time>
+                <time title="修改时间：2020-07-17 22:46:50" itemprop="dateModified" datetime="2020-07-17T22:46:50+08:00">2020-07-17</time>
               </span>
             <span class="post-meta-item">
               <span class="post-meta-item-icon">
@@ -224,9 +224,9 @@
 
       
         <p>提到数据库，相信很多人第一个想到的就是事务，今天就从事务开始，对数据库的基本特征以及背后的实现逻辑进行一个简单的说明。</p>
-<h2 id="事务"><a href="#事务" class="headerlink" title="事务"></a>事务</h2><p>在写这篇文章的时候，笔者特意又重新查了下事务的定义。维基百科中关于事务的定义是：“事务是数据库系统执行过程中的一个逻辑单位，由一个有限的数据库操作序列构成”。事务的概念本身并没有什么好展开的，事务之所以成为数据库系统最重要的特征之一，是因为事务的 ACID 属性。</p>
 <a id="more"></a>
 
+<h2 id="事务"><a href="#事务" class="headerlink" title="事务"></a>事务</h2><p>在写这篇文章的时候，笔者特意又重新查了下事务的定义。维基百科中关于事务的定义是：“事务是数据库系统执行过程中的一个逻辑单位，由一个有限的数据库操作序列构成”。事务的概念本身并没有什么好展开的，事务之所以成为数据库系统最重要的特征之一，是因为事务的 ACID 属性。</p>
 <h3 id="ACID"><a href="#ACID" class="headerlink" title="ACID"></a>ACID</h3><p><strong>Atomicity（原子性）</strong> ：事务中的一组操作，要么全部成功，要么全部失败，不存在部分成功的情况。原子性的定义相对是比较直观的，可以类比编程语言中的原子操作，从这个角度上来说，事务是数据库系统处理用户操作的最小单位（自动提交模式可以看作是一条语句一个事务）。数据库系统内部主要通过 Undo（回滚日志、前进项）来保证原子性。每一个操作在执行时，都会记录下执行前的状态到 Undo 中，当事务需要回滚时，就可以通过 Undo 恢复到事务执行前的状态。</p>
 <p><strong>Consistency（一致性）</strong> ：数据库总是从一个一致性状态转移到另一个一致性状态。一致性的定义比较模糊，什么叫从一个一致性状态转移到另一个一致性状态？其实这是由于中文的翻译往往只翻译了一半，关于一致性有一段非常最要的补充：</p>
 <figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">Any data written to the database must be valid according to all defined rules, </span><br><span class="line">including constraints, cascades, triggers, and any combination thereof.</span><br></pre></td></tr></table></figure>
@@ -258,10 +258,13 @@
         
     <div class="post-nav">
       <div class="post-nav-item">
-    <a href="/2020/07/04/sql-execute/" rel="prev" title="一条SQL的执行过程">
-      <i class="fa fa-chevron-left"></i> 一条SQL的执行过程
+    <a href="/2020/07/04/sql-execute/" rel="prev" title="一条 SQL 的执行过程">
+      <i class="fa fa-chevron-left"></i> 一条 SQL 的执行过程
     </a></div>
-      <div class="post-nav-item"></div>
+      <div class="post-nav-item">
+    <a href="/2020/07/15/connection-handler/" rel="next" title="MySQL 建连过程分析">
+      MySQL 建连过程分析 <i class="fa fa-chevron-right"></i>
+    </a></div>
     </div>
       </footer>
     
@@ -336,20 +339,20 @@
       <div class="site-state-item site-state-posts">
           <a href="/archives/">
         
-          <span class="site-state-item-count">3</span>
+          <span class="site-state-item-count">11</span>
           <span class="site-state-item-name">日志</span>
         </a>
       </div>
       <div class="site-state-item site-state-categories">
             <a href="/categories/">
           
-        <span class="site-state-item-count">1</span>
+        <span class="site-state-item-count">3</span>
         <span class="site-state-item-name">分类</span></a>
       </div>
       <div class="site-state-item site-state-tags">
             <a href="/tags/">
           
-        <span class="site-state-item-count">2</span>
+        <span class="site-state-item-count">4</span>
         <span class="site-state-item-name">标签</span></a>
       </div>
   </nav>
@@ -382,7 +385,7 @@
   </span>
   <span class="author" itemprop="copyrightHolder">magq1001@gmail.com</span>
 </div>
-  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://pisces.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Pisces</a> 强力驱动
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
   </div>
 
         

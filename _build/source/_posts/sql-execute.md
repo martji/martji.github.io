@@ -1,19 +1,19 @@
 ---
-title: 一条SQL的执行过程
+title: 一条 SQL 的执行过程
 date: 2020-07-04 19:22:11
 tags:
-- 数据库
+- MySQL
 categories: 
 - 数据库
 ---
 
 现代数据库是一个复杂的系统工程，但是一个典型的数据库系统都是由固定的部分组成，本文以一条 SQL 的执行过程作为入口，对数据库系统的全貌进行一个简单介绍。
 
+<!-- more -->
+
 ## 整体架构
 
 如图所示是一个关系型数据库系统的简单架构图，可以看到数据系系统是一个典型的 CS 架构。以 MySQL 为例，一个典型的数据库系统通常由两部分组成：Server 和 Storage Engine。Server 层按照功能划分又可以分为：连接处理（Connection handler）、语法解析（Parser）、优化器（Optimizer）、执行器（Executor）等部分。Storage Engine 也可以有不同的实现方式。
-
-<!-- more -->
 
 <img src="/images/sql-execute-1.jpg" width="68%" title="数据库架构图" alt="MySQL架构"/>
 
