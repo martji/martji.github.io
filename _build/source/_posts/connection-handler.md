@@ -11,6 +11,14 @@ categories:
 
 <!-- more -->
 
+## 数据结构
+
+在介绍 MySQL 建连过程之前，先整体看一下相关类的关系：
+
+<img src="/images/connection-handler-1.jpg" width="88%"/>
+
+MySQL 8.0 在 Linux 平台下使用的是 poll 机制，对于新的连接请求会转到 accept 进行处理。
+
 ## MySQL 建连过程
 
 MySQL 建连过程可以分为以下几个步骤：
@@ -22,6 +30,7 @@ static Connection_acceptor<Mysqld_socket_listener> *mysqld_socket_acceptor = NUL
 
 static bool network_init(void) {
   ...
+  /* 解析网络配置信息 */
   Mysqld_socket_listener *mysqld_socket_listener = new (std::nothrow)
       Mysqld_socket_listener(bind_addresses_info, mysqld_port,
                              admin_address_info, mysqld_admin_port,
@@ -31,7 +40,7 @@ static bool network_init(void) {
   mysqld_socket_acceptor = new (std::nothrow)
       Connection_acceptor<Mysqld_socket_listener>(mysqld_socket_listener);
   ...
-
+  /* 初始化监听端口 */
   if (mysqld_socket_acceptor->init_connection_acceptor())
     return true;
   ...
@@ -47,6 +56,7 @@ bool Mysqld_socket_listener::setup_listener() {
                             bind_address_info.network_namespace, m_tcp_port,
                             m_backlog, m_port_timeout);
 
+      /* socket 初始化，底层调用的还是 socket 函数 */
       MYSQL_SOCKET mysql_socket = tcp_socket.get_listener_socket();
       if (mysql_socket.fd == INVALID_SOCKET) return true;
 
@@ -57,6 +67,7 @@ bool Mysqld_socket_listener::setup_listener() {
     }
   }
 
+  /* 将所有监听的 socket 信息加入到 m_poll_info 中 */
   setup_connection_events(m_socket_map);
   return false;
 }
@@ -91,6 +102,7 @@ void Mysqld_socket_listener::add_socket_to_listener(
 
 Channel_info *Mysqld_socket_listener::listen_for_connection_event() {
 #ifdef HAVE_POLL
+  /* 通过 poll 机制进行监听 */
   int retval = poll(&m_poll_info.m_fds[0], m_socket_map.size(), -1);
 #else
   m_select_info.m_read_fds = m_select_info.m_client_fds;
@@ -99,6 +111,7 @@ Channel_info *Mysqld_socket_listener::listen_for_connection_event() {
 #endif
 
   bool is_unix_socket = false, is_admin_sock;
+  /* 获取到一个 ready 的 socket */
   MYSQL_SOCKET listen_sock = get_ready_socket(&is_unix_socket, &is_admin_sock);
   DBUG_ASSERT(mysql_socket_getfd(listen_sock) != INVALID_SOCKET);
   
@@ -127,6 +140,7 @@ void connection_event_loop() {
   Connection_handler_manager *mgr =
     Connection_handler_manager::get_instance();
   while (!connection_events_loop_aborted()) {
+    /* 监听到连接事件，开始 channel 处理 */
     Channel_info *channel_info = m_listener->listen_for_connection_event();
     if (channel_info != NULL) mgr->process_new_connection(channel_info);
   }
@@ -141,48 +155,43 @@ void Connection_handler_manager::process_new_connection(
   }
 }
 
-bool One_thread_connection_handler::add_connection(Channel_info *channel_info) {
-  if (my_thread_init()) {
+/* 一对一处理模式 */
+bool Per_thread_connection_handler::add_connection(Channel_info *channel_info) {
+  ...
+  channel_info->set_prior_thr_create_utime();
+  /* 新建一个线程进行处理 */
+  error =
+      mysql_thread_create(key_thread_one_connection, &id, &connection_attrib,
+                          handle_connection, (void *)channel_info);
+  ...
+  if (error) {
     connection_errors_internal++;
-    channel_info->send_error_and_close_channel(ER_OUT_OF_RESOURCES, 0, false);
+    if (!create_thd_err_log_throttle.log())
+      LogErr(ERROR_LEVEL, ER_CONN_PER_THREAD_NO_THREAD, error);
+    channel_info->send_error_and_close_channel(ER_CANT_CREATE_THREAD, error,
+                                               true);
+
     im::global_manager_dec_connection(NULL);
     return true;
   }
+  ...
+}
 
-  THD *thd = channel_info->create_thd();
-  if (thd == NULL) {
-    connection_errors_internal++;
-    channel_info->send_error_and_close_channel(ER_OUT_OF_RESOURCES, 0, false);
-    return true;
+static void *handle_connection(void *arg) {
+  ...
+  if (my_thread_init()) {
+    ...
   }
-
-  thd->set_new_thread_id();
-  
-  thd_set_thread_stack(thd, (char *)&thd);
-  thd->store_globals();
-
-  mysql_thread_set_psi_id(thd->thread_id());
-  mysql_socket_set_thread_owner(
-      thd->get_protocol_classic()->get_vio()->mysql_socket);
-
-  Global_THD_manager *thd_manager = Global_THD_manager::get_instance();
-  thd_manager->add_thd(thd);
-
-  bool error = false;
-  if (thd_prepare_connection(thd))
-    error = true;
-  else {
-    delete channel_info;
+  ...
+  for (;;) {
+    THD *thd = init_new_thd(channel_info);
+    ...
     while (thd_connection_alive(thd)) {
+      /* 开始请求处理 */
       if (do_command(thd)) break;
     }
-    end_connection(thd);
+    ...
   }
-  close_connection(thd, 0, false, false);
-  thd->release_resources();
-  thd_manager->remove_thd(thd);
-  delete thd;
-  return error;
 }
 ```
 
@@ -213,4 +222,3 @@ bool dispatch_command(THD *thd, const COM_DATA *com_data,
   }
 }
 ```
-

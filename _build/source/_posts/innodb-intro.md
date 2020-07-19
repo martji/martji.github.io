@@ -13,4 +13,4 @@ categories:
 
 ## InnoDB 整体架构
 
-<img src="/images/innodb-intro.png" width="88%" title="InnoDB架构图" alt="InnoDB架构"/>
+<img src="/images/innodb-intro.png" width="88%"/>

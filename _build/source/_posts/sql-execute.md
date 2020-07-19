@@ -15,7 +15,7 @@ categories:
 
 如图所示是一个关系型数据库系统的简单架构图，可以看到数据系系统是一个典型的 CS 架构。以 MySQL 为例，一个典型的数据库系统通常由两部分组成：Server 和 Storage Engine。Server 层按照功能划分又可以分为：连接处理（Connection handler）、语法解析（Parser）、优化器（Optimizer）、执行器（Executor）等部分。Storage Engine 也可以有不同的实现方式。
 
-<img src="/images/sql-execute-1.jpg" width="68%" title="数据库架构图" alt="MySQL架构"/>
+<img src="/images/sql-execute-1.jpg" width="78%"/>
 
 ## SQL 执行过程
 
