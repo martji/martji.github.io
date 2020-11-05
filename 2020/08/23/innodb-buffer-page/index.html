@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.2.1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"yoursite.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="InnoDB 没有使用操作系统自己的 Page Cache 机制，而是自己设计了一套 Buffer Pool 来进行 Page 的管理，关于 InnoDB Buffer Pool 的介绍，可以参考这篇文章，里面对 InnoDB Buffer Pool 作了比较深入的介绍。本文尝试从另外一个角度介绍一下一个 Buffer Page 的生命周期。本文给出的所有示例代码均基于 MySQL 8.0.18">
+<meta property="og:type" content="article">
+<meta property="og:title" content="InnoDB Buffer Page 生命周期">
+<meta property="og:url" content="http://yoursite.com/2020/08/23/innodb-buffer-page/index.html">
+<meta property="og:site_name" content="George Ma">
+<meta property="og:description" content="InnoDB 没有使用操作系统自己的 Page Cache 机制，而是自己设计了一套 Buffer Pool 来进行 Page 的管理，关于 InnoDB Buffer Pool 的介绍，可以参考这篇文章，里面对 InnoDB Buffer Pool 作了比较深入的介绍。本文尝试从另外一个角度介绍一下一个 Buffer Page 的生命周期。本文给出的所有示例代码均基于 MySQL 8.0.18">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2020-08-23T08:15:50.000Z">
+<meta property="article:modified_time" content="2020-08-27T08:44:14.922Z">
+<meta property="article:author" content="magq1001@gmail.com">
+<meta property="article:tag" content="InnoDB">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://yoursite.com/2020/08/23/innodb-buffer-page/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>InnoDB Buffer Page 生命周期 | George Ma</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">George Ma</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+  <a href="https://github.com/martji/martji.github.io" class="github-corner" title="Follow me on GitHub" aria-label="Follow me on GitHub" rel="noopener" target="_blank"><svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://yoursite.com/2020/08/23/innodb-buffer-page/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.jpg">
+      <meta itemprop="name" content="magq1001@gmail.com">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="George Ma">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          InnoDB Buffer Page 生命周期
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-08-23 16:15:50" itemprop="dateCreated datePublished" datetime="2020-08-23T16:15:50+08:00">2020-08-23</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">更新于</span>
+                <time title="修改时间：2020-08-27 16:44:14" itemprop="dateModified" datetime="2020-08-27T16:44:14+08:00">2020-08-27</time>
+              </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E6%95%B0%E6%8D%AE%E5%BA%93/" itemprop="url" rel="index"><span itemprop="name">数据库</span></a>
+                </span>
+            </span>
+
+          
+            <span class="post-meta-item" title="阅读次数" id="busuanzi_container_page_pv" style="display: none;">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-eye"></i>
+              </span>
+              <span class="post-meta-item-text">阅读次数：</span>
+              <span id="busuanzi_value_page_pv"></span>
+            </span>
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>InnoDB 没有使用操作系统自己的 Page Cache 机制，而是自己设计了一套 Buffer Pool 来进行 Page 的管理，关于 InnoDB Buffer Pool 的介绍，可以参考<a href="http://mysql.taobao.org/monthly/2017/05/01/" target="_blank" rel="noopener">这篇文章</a>，里面对 InnoDB Buffer Pool 作了比较深入的介绍。本文尝试从另外一个角度介绍一下一个 Buffer Page 的生命周期。本文给出的所有示例代码均基于 MySQL 8.0.18 版本。</p>
+<a id="more"></a>
+
+<h2 id="申请"><a href="#申请" class="headerlink" title="申请"></a>申请</h2><h3 id="Page-读取"><a href="#Page-读取" class="headerlink" title="Page 读取"></a>Page 读取</h3><p>Page 的读取有一个统一的入口函数 <code>buffer_page_get_gen</code> ，该方法的主要入参为 <code>page_id</code> ，即获取指定的页，MySQL 8.0 中的主要流程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* 以 Buf_fetch_normal 为例 */</span></span><br><span class="line">|--&gt; fetch.single_page</span><br><span class="line">|    |--&gt; <span class="built_in">get</span>(block) <span class="comment">// loop</span></span><br><span class="line">|    |    |--&gt; lookup</span><br><span class="line">|    |    |    |--&gt; buf_page_hash_get_low <span class="comment">// 检查 page_hash 中是否存在</span></span><br><span class="line">|    |    |--&gt; buf_block_fix <span class="comment">// buf_fix_count 计数 +1</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; read_page</span><br><span class="line">|    |    |    |--&gt; buf_read_page <span class="comment">// 从文件中读取 page</span></span><br><span class="line">|    |    |    |    |--&gt; buf_read_page_low</span><br><span class="line">|    |    |    |    |    |--&gt; buf_page_init_for_read</span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_LRU_get_free_block <span class="comment">// 申请 1 个 block</span></span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_page_hash_get_low <span class="comment">// 再次检查 page_hash 中是否存在</span></span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_page_init</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; buf_block_init_low</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; buf_page_init_low</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; HASH_INSERT <span class="comment">// 插入 page_hash</span></span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_page_set_io_fix <span class="comment">// io_fix 设置为 BUF_IO_READ</span></span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_LRU_add_block <span class="comment">// 添加到 LRU</span></span><br><span class="line">|    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |--&gt; _fil_io <span class="comment">// 读取文件</span></span><br><span class="line">|    |    |    |    |    |--&gt; buf_page_io_complete <span class="comment">// 同步模式 IO 完成</span></span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_page_set_io_fix <span class="comment">// io_fix 设置为 BUF_IO_NONE</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_page_make_young_if_needed</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_read_ahead_linear</span><br></pre></td></tr></table></figure>
+
+<p>读取 1 个 Page 时，首先会检查 <code>page_hash</code> ，如果 <code>page_hash</code> 中存在，则直接读取并设置 <code>buf_fix_count</code> 后返回；否则需要从文件中读取 Page，从文件中读取 Page 时首先需要申请 1 个 Block（具体申请过程在后面介绍），然后添加到 <code>page_hash</code> 和 <code>LRU</code> 列表中，最后进行数据的读取。对于 1 个新的 Page 的创建过程，入口函数为 <code>buf_page_create</code> ，基本流程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* buf_page_create */</span></span><br><span class="line">|--&gt; buf_page_create</span><br><span class="line">|    |--&gt; buf_LRU_get_free_block <span class="comment">// 申请 1 个 block</span></span><br><span class="line">|    |--&gt; buf_page_hash_get_low <span class="comment">// 检查 page_hash 中是否存在</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_page_init</span><br><span class="line">|    |    |--&gt; buf_block_init_low</span><br><span class="line">|    |    |--&gt; buf_page_init_low</span><br><span class="line">|    |    |--&gt; HASH_INSERT <span class="comment">// 插入 page_hash</span></span><br><span class="line">|    |--&gt; buf_block_buf_fix_inc <span class="comment">// buf_fix_count 计数 +1</span></span><br><span class="line">|    |--&gt; buf_LRU_add_block <span class="comment">// 添加到 LRU</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="Block-申请"><a href="#Block-申请" class="headerlink" title="Block 申请"></a>Block 申请</h3><p>Block 申请的入口函数为 <code>buf_LRU_get_free_block</code> ，该方法会从 Buffer Pool 中申请 1 个 Block 供后续的 Page 读取使用。Block 申请的主要流程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; buf_LRU_get_free_block <span class="comment">// loop</span></span><br><span class="line">|    |--&gt; buf_LRU_get_free_only <span class="comment">// 从 free_list 分配</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_LRU_scan_and_free_block <span class="comment">// 从 LRU 中回收</span></span><br><span class="line">|    |    |--&gt; buf_LRU_free_from_unzip_LRU_list</span><br><span class="line">|    |    |    |--&gt; buf_LRU_free_page</span><br><span class="line">|    |    |--&gt; buf_LRU_free_from_common_LRU_list</span><br><span class="line">|    |    |    |--&gt; buf_flush_ready_for_replace</span><br><span class="line">|    |    |    |--&gt; buf_LRU_free_page</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; os_event_set(buf_flush_event) <span class="comment">// 唤醒刷脏线程</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_flush_single_page_from_LRU <span class="comment">// 从 LRU 中刷脏</span></span><br><span class="line">|    |    |--&gt; buf_LRU_free_page</span><br><span class="line">|    |    |--&gt; buf_flush_page</span><br></pre></td></tr></table></figure>
+
+<p>Buffer Pool 中维护了三个列表：<code>free_list</code> 、<code>LRU</code> 、<code>flush_list</code> 。其中 <code>free_list</code> 列表是当前可供使用的 Block，<code>LRU</code> 列表中保存了当前所有已经使用的 Block，<code>flush_list</code> 列表中保存了所有脏页 Block。申请 1 个 Block 时：</p>
+<ol>
+<li>首先判断当前 <code>free_list</code> 列表是否为空，若 <code>free_list</code> 列表非空，则直接从 <code>free_list</code> 列表中进行分配。若无法直接从 <code>free_list</code> 列表分配，则会尝试从 <code>LRU</code> 列表中进行回收。</li>
+<li><code>LRU</code> 是一个非严格的最近使用列表，从 <code>LRU</code> 列表回收时会从列表尾部往前遍历（加入 <code>LRU</code> 列表时从头部加入），如果找到可回收的 Page（遇到脏页会跳过），则会释放 Page 并将对应的 Block 重新放入 <code>free_list</code> 列表中。<code>LRU</code> 列表的遍历过程并不是无限的，例如：在第一次遍历时，当检查的 Page 数目达到 <code>BUF_LRU_SEARCH_SCAN_THRESHOLD</code> 时会退出遍历过程。</li>
+<li>如果无法从 <code>LRU</code> 列表中回收 Block，则会唤醒刷脏线程，刷脏线程的处理流程在下面会做介绍。</li>
+<li>同时还会从 <code>LRU</code> 列表中进行刷脏，该过程是同步的，依然是遍历 <code>LRU</code> 列表，但此时不会跳过脏页，遇到脏页直接进行刷脏。</li>
+</ol>
+<h2 id="管理"><a href="#管理" class="headerlink" title="管理"></a>管理</h2><h3 id="加入-flush-list"><a href="#加入-flush-list" class="headerlink" title="加入 flush_list"></a>加入 flush_list</h3><p>前面提到过 <code>flush_list</code> 列表中保存的是所有脏页 Block，脏页在 mtr 提交时会加入 <code>flush_list</code> 中，基本过程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; <span class="keyword">mtr_t</span>::Command::execute()</span><br><span class="line">|    |--&gt; add_dirty_page_to_flush_list</span><br><span class="line">|    |    |--&gt; buf_flush_note_modification</span><br><span class="line">|    |    |    |--&gt; buf_flush_insert_into_flush_list</span><br><span class="line">|    |    |    |    |--&gt; UT_LIST_ADD_FIRST <span class="comment">// 插入 flush_list 头部</span></span><br></pre></td></tr></table></figure>
+
+<p>注意：<code>flush_list</code> 是一个非严格有序的列表（可以看做按照 <code>oldest_modification</code> 有序），脏页插入列表后位置不再修改，再次修改时仅修改 <code>newest_modification</code> 。</p>
+<h3 id="加入-LRU"><a href="#加入-LRU" class="headerlink" title="加入 LRU"></a>加入 LRU</h3><p><code>LRU</code> 列表中保存了当前所有已经使用的 Block，申请完 1 个 Block 并完成初始化后会加到 <code>LRU</code> 列表中（默认会加入到 old 区域头部），加入 <code>LRU</code> 列表的基本过程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; buf_LRU_add_block</span><br><span class="line">|    |--&gt; buf_LRU_add_block_low</span><br><span class="line">|    |    |--&gt; UT_LIST_ADD_FIRST <span class="comment">// 插入 young 区域头部</span></span><br><span class="line">|    |    |--&gt; UT_LIST_INSERT_AFTER <span class="comment">// 插入 old 区域头部</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; buf_LRU_old_adjust_len <span class="comment">// 调整 LRU</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="管理-LRU"><a href="#管理-LRU" class="headerlink" title="管理 LRU"></a>管理 LRU</h3><p>前面提到 <code>LRU</code> 是一个非严格的最近使用列表，InnoDB 将 <code>LRU</code> 列表划分为两个区域：young 区域和 old 区域。<code>LRU</code> 列表的示意图如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/** LRU 列表示意图</span></span><br><span class="line"><span class="comment">                                                LRU_old</span></span><br><span class="line"><span class="comment">                                                   |</span></span><br><span class="line"><span class="comment">**********************young************************|********old*********</span></span><br><span class="line"><span class="comment">|==================================================|===================|</span></span><br><span class="line"><span class="comment"></span></span><br><span class="line"><span class="comment">几个主要的常量：</span></span><br><span class="line"><span class="comment">BUF_LRU_OLD_TOLERANCE      20</span></span><br><span class="line"><span class="comment">BUF_LRU_NON_OLD_MIN_LEN    5</span></span><br><span class="line"><span class="comment">BUF_LRU_OLD_MIN_LEN        512</span></span><br><span class="line"><span class="comment">BUF_LRU_OLD_RATIO_DIV      1024</span></span><br><span class="line"><span class="comment"></span></span><br><span class="line"><span class="comment">参数控制：</span></span><br><span class="line"><span class="comment">innodb_old_block_pct       old 区域占比</span></span><br><span class="line"><span class="comment"></span></span><br><span class="line"><span class="comment">*/</span></span><br></pre></td></tr></table></figure>
+
+<p><code>buf_LRU_old_adjust_len</code>  方法会根据 <code>innodb_old_block_pct</code> 参数，维护 young 区域和 old 区域的长度，主要逻辑如下：</p>
+<ol>
+<li>当 <code>LRU</code> 长度小于 <code>BUF_LRU_OLD_MIN_LEN</code> 时，不划分区域。</li>
+<li>不是每次操作 <code>LRU</code> 列表后都需要立即调整，<code>BUF_LRU_OLD_TOLERANCE</code>  可以看成是容忍范围。</li>
+<li>当 old 区域变大时，LRU_old 指针向前移动；反之向后移动。</li>
+</ol>
+<p>当 Block 被再次访问时，会触发 <code>buf_page_make_young_if_needed</code> 函数进行 Block 位置的调整，基本过程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; buf_page_make_young_if_needed</span><br><span class="line">|    |--&gt; buf_page_peek_if_too_old <span class="comment">// 判断访问间隔</span></span><br><span class="line">|    |    |--&gt; buf_page_peek_if_young <span class="comment">// 判断 young 区域位置</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_page_make_young</span><br><span class="line">|    |    |--&gt; buf_LRU_make_block_young</span><br><span class="line">|    |    |    |--&gt; buf_LRU_remove_block</span><br><span class="line">|    |    |    |--&gt; buf_LRU_add_block_low</span><br></pre></td></tr></table></figure>
+
+<p><code>buf_page_make_young_if_needed</code> 移动 Block 时需要考虑：</p>
+<ol>
+<li>访问间隔需要大于 <code>buf_LRU_old_threshold_ms</code> 。</li>
+<li>当 Block 在 young 区域前 1/4 时，不需要移动。</li>
+</ol>
+<p>InnoDB 中 <code>LRU</code> 列表的设计虽然简单，但是也有许多优化在里面，感兴趣的同学可以仔细研究，本文仅是一个简单的介绍。</p>
+<h2 id="回收"><a href="#回收" class="headerlink" title="回收"></a>回收</h2><h3 id="释放-Page"><a href="#释放-Page" class="headerlink" title="释放 Page"></a>释放 Page</h3><p>前面提到，当 <code>free_list</code> 列表为空时，会首先尝试从 <code>LRU</code> 列表中进行回收，Page 的释放入口函数为 <code>buf_LRU_free_page</code> ，该方法的主要处理流程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; buf_LRU_free_page</span><br><span class="line">|    |--&gt; buf_page_can_relocate <span class="comment">// 检查 buf_fix_count 计数和 io_fix 状态</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_LRU_block_remove_hashed <span class="comment">// 从 LRU 和 page_hash 中删除</span></span><br><span class="line">|    |    |--&gt; buf_LRU_remove_block</span><br><span class="line">|    |    |    |--&gt; buf_LRU_old_adjust_len</span><br><span class="line">|    |    |--&gt; HASH_DELETE</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; btr_search_drop_page_hash_index <span class="comment">// 从 AHI 中删除</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_LRU_block_free_hashed_page <span class="comment">// 放回 free_list</span></span><br><span class="line">|    |    |--&gt; buf_LRU_block_free_non_file_page</span><br></pre></td></tr></table></figure>
+
+<p>释放 1 个 Page 时，首先需要检查 <code>io_fix</code> 状态和 <code>buf_fix_count</code> 计数，确保当前 Page 没有被使用，然后将 Block 从依次从 <code>LRU</code> 列表、<code>page_hash</code> 、<code>AHI</code> 中删除，最后将 Block 重新放入到 <code>free_list</code> 列表中。</p>
+<h3 id="同步刷脏"><a href="#同步刷脏" class="headerlink" title="同步刷脏"></a>同步刷脏</h3><p>同步刷脏的入口函数为 <code>buf_flush_page</code> ，同步刷脏过程仅会刷 1 个 Page，保证能够获取到 1 个可用的 Block，主要处理流程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; buf_flush_page <span class="comment">// 刷单个 page</span></span><br><span class="line">|    |--&gt; buf_page_set_io_fix <span class="comment">// io_fix 设置为 BUF_IO_WRITE</span></span><br><span class="line">|    |--&gt; buf_flush_write_block_low</span><br><span class="line">|    |    |--&gt; log_write_up_to <span class="comment">// 写 redo</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; fil_io</span><br><span class="line">|    |    |--&gt; buf_dblwr_write_single_page <span class="comment">// 写数据页</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; fil_flush</span><br><span class="line">|    |    |--&gt; buf_page_io_complete</span><br><span class="line">|    |    |    |--&gt; buf_flush_write_complete</span><br><span class="line">|    |    |    |    |--&gt; buf_flush_remove</span><br><span class="line">|    |    |    |    |--&gt; buf_page_set_io_fix <span class="comment">// io_fix 设置为 BUF_IO_NONE</span></span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; buf_LRU_free_page</span><br></pre></td></tr></table></figure>
+
+<p>InnoDB 通过严格的 WAL 机制保证数据的一致性，刷脏过程同样如此。首先需要保证对应的日志文件落盘，然后再写入数据页。最后将 Block 从 <code>flush_list</code> 列表中移除，此时 Page 变成可回收状态，再次调用 <code>buf_LRU_free_page</code> 进行回收。</p>
+<p>同步刷脏的过程不仅在获取 Block 时会被调用，在表删除的时候同样会被调用，表删除时会根据 <code>space_id</code> 进行批量的刷脏，入口函数为 <code>buf_LRU_flush_or_remove_pages</code> ，处理流程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; buf_LRU_flush_or_remove_pages <span class="comment">// 根据 space_id 刷脏</span></span><br><span class="line">|    |--&gt; buf_LRU_drop_page_hash_for_tablespace <span class="comment">// 遍历 LRU</span></span><br><span class="line">|    |    |--&gt; buf_LRU_drop_page_hash_batch</span><br><span class="line">|    |    |    |--&gt; btr_search_drop_page_hash_when_freed</span><br><span class="line">|    |    |    |    |--&gt; buf_page_get_gen</span><br><span class="line">|    |    |    |    |--&gt; btr_search_drop_page_hash_index <span class="comment">// 从 AHI 中删除</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; buf_LRU_remove_pages</span><br><span class="line">|    |    |--&gt; buf_LRU_remove_all_pages <span class="comment">// 遍历 LRU</span></span><br><span class="line">|    |    |    |--&gt; buf_LRU_block_remove_hashed <span class="comment">// 从 LRU 和 page_hash 中删除</span></span><br><span class="line">|    |    |    |--&gt; buf_LRU_block_free_hashed_page <span class="comment">// 放回 free_list</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; buf_flush_dirty_pages</span><br><span class="line">|    |    |    |--&gt; buf_flush_or_remove_pages <span class="comment">// 遍历 flush_list</span></span><br><span class="line">|    |    |    |    |--&gt; buf_flush_or_remove_page</span><br><span class="line">|    |    |    |    |    |--&gt; buf_flush_remove</span><br><span class="line">|    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |--&gt; buf_flush_page</span><br></pre></td></tr></table></figure>
+
+<p>具体的过程在此不再赘述，大家可以自己去阅读相应的代码。需要注意的是：如果单个 session 中使用了临时表，那么在 session 退出的时候，也会进入到上述的刷脏流程，当 <code>LRU</code> 列表很大时，session 退出的性能将会受到很大的影响。</p>
+<h3 id="异步刷脏"><a href="#异步刷脏" class="headerlink" title="异步刷脏"></a>异步刷脏</h3><p>除了同步刷脏之外，MySQL 中还引入单独的刷脏线程进行异步刷脏。刷脏线程按照功能划分包括两种：coordinator 线程和 cleaner 线程。coordinator 线程会计算最大的刷脏量，然后分配刷脏任务给 cleaner 线程，cleaner 线程进行实际的刷脏工作（coordinator 线程本身也会参与刷脏）。异步刷脏的入口函数为 <code>buf_flush_page_cleaner_init</code> ，基本流程如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; buf_flush_page_coordinator_thread</span><br><span class="line">|    |--&gt; os_event_wait(buf_flush_event)</span><br><span class="line">|    </span><br><span class="line">|    <span class="comment">/* loop */</span></span><br><span class="line">|    |--&gt; page_cleaner_flush_pages_recommendation <span class="comment">// 计算最大刷脏量</span></span><br><span class="line">|    |--&gt; pc_request <span class="comment">// 任务分发，slot 数目等于 bp_instance 数目</span></span><br><span class="line">|    |    |--&gt; os_event_set(page_cleaner-&gt;is_requested)</span><br><span class="line">|    |--&gt; pc_flush_slot <span class="comment">// 参与刷脏</span></span><br><span class="line">|    |--&gt; pc_wait_finished</span><br><span class="line"></span><br><span class="line"></span><br><span class="line">|--&gt; buf_flush_page_cleaner_thread</span><br><span class="line">|    |--&gt; os_event_wait(page_cleaner-&gt;is_requested)</span><br><span class="line">|    |--&gt; pc_flush_slot <span class="comment">// 1 个线程处理 1 个 bp_instance</span></span><br><span class="line">|    |    |--&gt; buf_flush_LRU_list <span class="comment">// 从 LRU 中刷脏</span></span><br><span class="line">|    |    |    |--&gt; buf_flush_do_batch(BUF_FLUSH_LRU)</span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; buf_flush_do_batch(BUF_FLUSH_LIST) <span class="comment">// 从 flush_list 刷脏</span></span><br><span class="line">|    |    |    |--&gt; buf_flush_batch</span><br><span class="line">|    |    |    |    |--&gt; buf_do_LRU_batch</span><br><span class="line">|    |    |    |    |    |--&gt; buf_free_from_unzip_LRU_list_batch</span><br><span class="line">|    |    |    |    |    |--&gt; buf_flush_LRU_list_batch</span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_LRU_free_page</span><br><span class="line">|    |    |    |    |    |    |--&gt; buf_flush_page_and_try_neighbors</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; buf_flush_try_neighbors</span><br><span class="line">|    |    |    |    |    |    |    |    |--&gt; buf_flush_page</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; buf_do_flush_list_batch</span><br><span class="line">|    |    |    |    |    |--&gt; buf_flush_page_and_try_neighbors</span><br></pre></td></tr></table></figure>
+
+<p>异步刷脏的具体过程可以参考<a href="http://mysql.taobao.org/monthly/2018/09/02/" target="_blank" rel="noopener">这篇文章</a>，异步刷脏过程中有一个非常重要的点就是 <code>page_cleaner_flush_pages_recommendation</code> 计算最大刷脏量，相关的细节在此不再展开，后面有机会再单独整理一篇各种后台线程的更新逻辑。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>本文从申请、管理、回收三部分对 InnoDB Buffer Page 的生命周期管理进行了介绍，文中的内容只是一个基本概要，更多的细节还需要读者在阅读代码的过程中慢慢发掘。</p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/InnoDB/" rel="tag"># InnoDB</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/07/18/cgroup-linux/" rel="prev" title="cgroups 使用简介">
+      <i class="fa fa-chevron-left"></i> cgroups 使用简介
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/09/13/io-performance/" rel="next" title="磁盘 IO 性能分析">
+      磁盘 IO 性能分析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#申请"><span class="nav-number">1.</span> <span class="nav-text">申请</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Page-读取"><span class="nav-number">1.1.</span> <span class="nav-text">Page 读取</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Block-申请"><span class="nav-number">1.2.</span> <span class="nav-text">Block 申请</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#管理"><span class="nav-number">2.</span> <span class="nav-text">管理</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#加入-flush-list"><span class="nav-number">2.1.</span> <span class="nav-text">加入 flush_list</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#加入-LRU"><span class="nav-number">2.2.</span> <span class="nav-text">加入 LRU</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#管理-LRU"><span class="nav-number">2.3.</span> <span class="nav-text">管理 LRU</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#回收"><span class="nav-number">3.</span> <span class="nav-text">回收</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#释放-Page"><span class="nav-number">3.1.</span> <span class="nav-text">释放 Page</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#同步刷脏"><span class="nav-number">3.2.</span> <span class="nav-text">同步刷脏</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#异步刷脏"><span class="nav-number">3.3.</span> <span class="nav-text">异步刷脏</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#总结"><span class="nav-number">4.</span> <span class="nav-text">总结</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="magq1001@gmail.com"
+      src="/images/avatar.jpg">
+  <p class="site-author-name" itemprop="name">magq1001@gmail.com</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">13</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">3</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">4</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2020</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">magq1001@gmail.com</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
+  </div>
+
+        
+<div class="busuanzi-count">
+  <script async src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+</div>
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

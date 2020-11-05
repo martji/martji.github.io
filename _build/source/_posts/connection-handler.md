@@ -17,7 +17,7 @@ categories:
 
 <img src="/images/connection-handler-1.jpg" width="88%"/>
 
-MySQL 8.0 在 Linux 平台下使用的是 poll 机制，对于新的连接请求会转到 accept 进行处理。
+MySQL 8.0 在 Linux 平台下使用的是 poll 机制，默认情况下每个用户连接会使用一个单独的线程进行处理。
 
 ## MySQL 建连过程
 
@@ -56,7 +56,7 @@ bool Mysqld_socket_listener::setup_listener() {
                             bind_address_info.network_namespace, m_tcp_port,
                             m_backlog, m_port_timeout);
 
-      /* socket 初始化，底层调用的还是 socket 函数 */
+      /* socket 初始化，底层调用的还是 socket/bind/listen 函数 */
       MYSQL_SOCKET mysql_socket = tcp_socket.get_listener_socket();
       if (mysql_socket.fd == INVALID_SOCKET) return true;
 
@@ -70,6 +70,15 @@ bool Mysqld_socket_listener::setup_listener() {
   /* 将所有监听的 socket 信息加入到 m_poll_info 中 */
   setup_connection_events(m_socket_map);
   return false;
+}
+
+/* socker 初始化 */
+MYSQL_SOCKET TCP_socket::get_listener_socket() {
+  ...
+  MYSQL_SOCKET listener_socket = create_socket(ai_ptr.get(), AF_INET, &a);
+  mysql_socket_bind(listener_socket, a->ai_addr, a->ai_addrlen);
+  mysql_socket_listen(listener_socket, static_cast<int>(m_backlog);
+  ...
 }
 
 void Mysqld_socket_listener::setup_connection_events(
@@ -99,6 +108,26 @@ void Mysqld_socket_listener::add_socket_to_listener(
     m_select_info.m_max_used_connection = mysql_socket_getfd(listen_socket);
 #endif
 }
+```
+
+### 连接建立
+
+```c++
+int mysqld_main(int argc, char **argv) {
+  ...
+  mysqld_socket_acceptor->connection_event_loop();
+  ...
+}
+
+void connection_event_loop() {
+  Connection_handler_manager *mgr =
+    Connection_handler_manager::get_instance();
+  while (!connection_events_loop_aborted()) {
+    /* 监听到连接事件，开始 channel 处理 */
+    Channel_info *channel_info = m_listener->listen_for_connection_event();
+    if (channel_info != NULL) mgr->process_new_connection(channel_info);
+  }
+}
 
 Channel_info *Mysqld_socket_listener::listen_for_connection_event() {
 #ifdef HAVE_POLL
@@ -125,26 +154,6 @@ Channel_info *Mysqld_socket_listener::listen_for_connection_event() {
     channel_info = new (std::nothrow)
         Channel_info_tcpip_socket(connect_sock, is_admin_sock);
 }
-```
-
-### 连接建立
-
-```c++
-int mysqld_main(int argc, char **argv) {
-  ...
-  mysqld_socket_acceptor->connection_event_loop();
-  ...
-}
-
-void connection_event_loop() {
-  Connection_handler_manager *mgr =
-    Connection_handler_manager::get_instance();
-  while (!connection_events_loop_aborted()) {
-    /* 监听到连接事件，开始 channel 处理 */
-    Channel_info *channel_info = m_listener->listen_for_connection_event();
-    if (channel_info != NULL) mgr->process_new_connection(channel_info);
-  }
-}
 
 void Connection_handler_manager::process_new_connection(
     Channel_info *channel_info) {
@@ -158,6 +167,9 @@ void Connection_handler_manager::process_new_connection(
 /* 一对一处理模式 */
 bool Per_thread_connection_handler::add_connection(Channel_info *channel_info) {
   ...
+  /* 检查是否有空闲的线程 */
+  if (!check_idle_thread_and_enqueue_connection(channel_info)) return false;
+  
   channel_info->set_prior_thr_create_utime();
   /* 新建一个线程进行处理 */
   error =
@@ -179,6 +191,7 @@ bool Per_thread_connection_handler::add_connection(Channel_info *channel_info) {
 
 static void *handle_connection(void *arg) {
   ...
+  Channel_info *channel_info = static_cast<Channel_info *>(arg);
   if (my_thread_init()) {
     ...
   }
@@ -191,6 +204,8 @@ static void *handle_connection(void *arg) {
       if (do_command(thd)) break;
     }
     ...
+    /* thread 复用 */
+    channel_info = Per_thread_connection_handler::block_until_new_connection();
   }
 }
 ```
@@ -222,3 +237,7 @@ bool dispatch_command(THD *thd, const COM_DATA *com_data,
   }
 }
 ```
+
+## 附
+
+MySQL 5.7 可以参考：http://mysql.taobao.org/monthly/2016/07/04/

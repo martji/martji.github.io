@@ -16,6 +16,12 @@ sh build.sh
 
 Then you can add the generated files under the root folder like normal.
 
+## Public
+
+```
+hexo s
+```
+
 ## Referance
 
 1. https://github.com/limedroid/HexoLearning
