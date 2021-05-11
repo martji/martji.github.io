@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.2.1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"yoursite.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="MySQL 中的 TABLE 是最核心的数据结构之一，包含的类包括：TABLE、TABLE_LIST、TABLE_SHARE 等，下面结合 MySQL 的代码进行分析说明。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL 中的 TABLE 对象">
+<meta property="og:url" content="http://yoursite.com/2020/12/05/mysql/table-object/index.html">
+<meta property="og:site_name" content="George Ma">
+<meta property="og:description" content="MySQL 中的 TABLE 是最核心的数据结构之一，包含的类包括：TABLE、TABLE_LIST、TABLE_SHARE 等，下面结合 MySQL 的代码进行分析说明。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="http://yoursite.com/images/table-object-1.png">
+<meta property="og:image" content="http://yoursite.com/images/div.jpg">
+<meta property="article:published_time" content="2020-12-05T12:07:49.000Z">
+<meta property="article:modified_time" content="2020-12-05T12:45:02.274Z">
+<meta property="article:author" content="magq1001@gmail.com">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http://yoursite.com/images/table-object-1.png">
+
+<link rel="canonical" href="http://yoursite.com/2020/12/05/mysql/table-object/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>MySQL 中的 TABLE 对象 | George Ma</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">George Ma</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+  <a href="https://github.com/martji/martji.github.io" class="github-corner" title="Follow me on GitHub" aria-label="Follow me on GitHub" rel="noopener" target="_blank"><svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://yoursite.com/2020/12/05/mysql/table-object/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.jpg">
+      <meta itemprop="name" content="magq1001@gmail.com">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="George Ma">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL 中的 TABLE 对象
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+              
+
+              <time title="创建时间：2020-12-05 20:07:49 / 修改时间：20:45:02" itemprop="dateCreated datePublished" datetime="2020-12-05T20:07:49+08:00">2020-12-05</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/MySQL/" itemprop="url" rel="index"><span itemprop="name">MySQL</span></a>
+                </span>
+            </span>
+
+          
+            <span class="post-meta-item" title="阅读次数" id="busuanzi_container_page_pv" style="display: none;">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-eye"></i>
+              </span>
+              <span class="post-meta-item-text">阅读次数：</span>
+              <span id="busuanzi_value_page_pv"></span>
+            </span>
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>MySQL 中的 TABLE 是最核心的数据结构之一，包含的类包括：TABLE、TABLE_LIST、TABLE_SHARE 等，下面结合 MySQL 的代码进行分析说明。</p>
+<a id="more"></a>
+
+<h2 id="基本说明"><a href="#基本说明" class="headerlink" title="基本说明"></a>基本说明</h2><ul>
+<li>TABLE_LIST：词法&amp;语法分析后生成的对象，常见的生成方式为 add_table_to_list</li>
+<li>TABLE_SHARE：server 层表定义缓存，一个 table 实例对应一个 TABLES_SHARE 对象，可以将TABLE_SHRAE 对象看成是表的物理文件（frm）在内存中的映射</li>
+<li>TABLE：每一个查询 sql 中的表建一个 TABLE 对象</li>
+</ul>
+<img src="/images/table-object-1.png" align="left"/>
+<img class="nofancybox" src="/images/div.jpg" width="100%" height="0.1px"/>
+
+<p>TABLE_LIST 只是一个表的描述信息，包括各种名称、锁类型等；</p>
+<p>TABLE_SHARE 可以看作是完整的表定义信息，在 8.0 以前的版本中需要通过读取 frm 文件获取，8.0 版本中引入了 DD，可以直接通过 DD 获取到表定义信息。Server 层有一个全局的 Table_definition_cache 缓存对象，保存已经打开的 TABLE_SHARE 对象；</p>
+<p>TABLE 对象为查询最后使用的 TABLE 信息，该对象上关联了引擎层的 hander，所有的引擎层的操作都需要通过此 hander 进行。Server 层同样有一个全局的 Table_cache_manager，然而 TABLE 的缓存和 TABLE_SHARE 的缓存不同，由于每个 THD 上的 TABLE 对象都不相同，所有同一个表会在 Table_cache_manager 保存多份。</p>
+<p>关于 Table_cache_manager，有两个参数进行控制：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">MySQL [none]&gt; show variables like "%table_open%";</span><br><span class="line">+<span class="comment">----------------------------+-------+</span></span><br><span class="line">| Variable_name              | Value |</span><br><span class="line">+<span class="comment">----------------------------+-------+</span></span><br><span class="line">| table_open_cache           | 500   |</span><br><span class="line">| table_open_cache_instances | 16    |</span><br><span class="line">+<span class="comment">----------------------------+-------+</span></span><br><span class="line">2 rows in <span class="keyword">set</span> (<span class="number">0.01</span> sec)</span><br></pre></td></tr></table></figure>
+
+<p>其中：</p>
+<ul>
+<li>table_open_cache_instances 表示将 Table_cache_manager 分为多少个部分；</li>
+<li>table_open_cache 表示 TABLE 对象的阈值，超过此值后会开始进行无用对象的回收；</li>
+</ul>
+<h2 id="MySQL-8-0"><a href="#MySQL-8-0" class="headerlink" title="MySQL 8.0"></a>MySQL 8.0</h2><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; open_tables</span><br><span class="line">|    |--&gt; open_and_process_table</span><br><span class="line">|    |    |--&gt; open_table  <span class="comment">// 打开表</span></span><br><span class="line">|    |    |    |--&gt; thd-&gt;mdl_context.acquire_lock  <span class="comment">// 获取 MDL 锁</span></span><br><span class="line">|    |    |    |--&gt; open_table_get_mdl_lock</span><br><span class="line">|    |    |    |    |--&gt; thd-&gt;mdl_context.acquire_lock</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; check_if_table_exists</span><br><span class="line">|    |    |    |    |--&gt; dd::table_exists</span><br><span class="line">|    |    |    |    |    |--&gt; client-&gt;acquire <span class="comment">// dd::Abstract_table</span></span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; tc-&gt;get_table  <span class="comment">//  从 Table_cache_manager 查找</span></span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; get_table_share_with_discover  <span class="comment">// 构建 TABLE_SHARE</span></span><br><span class="line">|    |    |    |    |--&gt; get_table_share</span><br><span class="line">|    |    |    |    |    |--&gt; table_def_cache-&gt;<span class="built_in">find</span>  <span class="comment">// 从 Table_definition_cache 查找</span></span><br><span class="line">|    |    |    |    |    |--&gt; process_found_table_share</span><br><span class="line">|    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |--&gt; alloc_table_share</span><br><span class="line">|    |    |    |    |    |--&gt; table_def_cache-&gt;emplace  <span class="comment">// 维护 Table_definition_cache</span></span><br><span class="line">|    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |--&gt; thd-&gt;dd_client()-&gt;acquire</span><br><span class="line">|    |    |    |    |    |--&gt; open_table_def</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; open_table_from_share  <span class="comment">// 通过 TABLE_SHARE 打开 TABLE</span></span><br><span class="line">|    |    |    |    |--&gt; ha_open</span><br><span class="line">|    |    |    |    |    |--&gt; ha_innobase::<span class="built_in">open</span> <span class="comment">// 打开一个 innodb 表</span></span><br><span class="line">|    |    |    |    |    |    |--&gt; lookup_table_handler</span><br><span class="line">|    |    |    |    |    |    |--&gt; dict_table_check_if_in_cache_low</span><br><span class="line">|    |    |    |    |    |    |--&gt; dd_open_table</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; dd_open_table_one</span><br><span class="line">|    |    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |    |--&gt; row_create_prebuilt</span><br><span class="line">|    |    |    |    |    |    |--&gt; info(...)</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; info_low</span><br><span class="line">|    |    |    |    |    |    |    |    |--&gt; update_thd</span><br><span class="line">|    |    |    |    |    |    |    |    |    |--&gt; row_update_prebuilt_trx</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; tc-&gt;add_used_table  <span class="comment">// 添加到 Table_cache_manager</span></span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; thd-&gt;set_open_tables</span><br><span class="line">|    |    |    |--&gt; table-&gt;init</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">|--&gt; close_thread_tables</span><br><span class="line">|    |--&gt; mysql_unlock_tables</span><br><span class="line">|    |    |--&gt; unlock_external</span><br><span class="line">|    |    |    |--&gt; ha_external_lock</span><br><span class="line">|    |    |    |    |--&gt; ha_innobase::external_lock</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; close_open_tables</span><br><span class="line">|    |    |--&gt; close_thread_table</span><br><span class="line">|    |    |    |--&gt; release_or_close_table</span><br><span class="line">|    |    |    |    |--&gt; intern_close_table</span><br><span class="line">|    |    |    |    |--&gt; tc-&gt;remove_table</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; tc-&gt;release_table</span><br></pre></td></tr></table></figure>
+
+<h2 id="MySQL-5-7"><a href="#MySQL-5-7" class="headerlink" title="MySQL 5.7"></a>MySQL 5.7</h2><h3 id="表打开过程"><a href="#表打开过程" class="headerlink" title="表打开过程"></a>表打开过程</h3><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">open_table</span><span class="params">(THD *thd, TABLE_LIST *table_list, Open_table_context *ot_ctx)</span></span></span><br><span class="line">    |</span><br><span class="line">    |</span><br><span class="line">    |--&gt; <span class="function">TABLE* <span class="title">Table_cache::get_table</span><span class="params">(THD *thd, my_hash_value_type hash_value,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                                  <span class="keyword">const</span> <span class="keyword">char</span> *key, <span class="keyword">size_t</span> key_length,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                                  TABLE_SHARE **share)</span></span></span><br><span class="line">    |</span><br><span class="line">    |</span><br><span class="line">    |--&gt; TABLE_SHARE *</span><br><span class="line">    |    get_table_share_with_discover(THD *thd, TABLE_LIST *table_list,</span><br><span class="line">    |                                  <span class="keyword">const</span> <span class="keyword">char</span> *key, <span class="keyword">size_t</span> key_length,</span><br><span class="line">    |                                  uint db_flags, <span class="keyword">int</span> *error,</span><br><span class="line">    |                                  my_hash_value_type hash_value)</span><br><span class="line">    |        |</span><br><span class="line">    |        |</span><br><span class="line">    |        |--&gt; <span class="function">TABLE_SHARE *<span class="title">get_table_share</span><span class="params">(THD *thd, TABLE_LIST *table_list,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                                 <span class="keyword">const</span> <span class="keyword">char</span> *key, <span class="keyword">size_t</span> key_length,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                                 uint db_flags, <span class="keyword">int</span> *error,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                                 my_hash_value_type hash_value)</span></span></span><br><span class="line">    |        |        |</span><br><span class="line">    |        |        |</span><br><span class="line">    |        |        |--&gt; <span class="function">uchar* <span class="title">my_hash_search_using_hash_value</span><span class="params">(<span class="keyword">const</span> HASH *hash, </span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                                            my_hash_value_type hash_value,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                                            <span class="keyword">const</span> uchar *key,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                                            <span class="keyword">size_t</span> length)</span></span></span><br><span class="line">    |        |        |</span><br><span class="line">    |        |        |</span><br><span class="line">    |        |        |--&gt; <span class="function"><span class="keyword">int</span> <span class="title">open_table_def</span><span class="params">(THD *thd, TABLE_SHARE *share, uint db_flags)</span></span></span><br><span class="line">    |        |        |        |</span><br><span class="line">    |        |        |        |</span><br><span class="line">    |        |        |        |--&gt; <span class="function"><span class="keyword">static</span> <span class="keyword">int</span> <span class="title">open_binary_frm</span><span class="params">(THD *thd, TABLE_SHARE *share, uchar *head,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |        |                               <span class="built_in">File</span> file)</span></span></span><br><span class="line">    |        |        |        |        |</span><br><span class="line">    |        |        |        |        |</span><br><span class="line">    |        |        |        |        |--&gt; <span class="function">handler *<span class="title">get_new_handler</span><span class="params">(TABLE_SHARE *share, MEM_ROOT *alloc,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |        |        |                             handlerton *db_type)</span></span></span><br><span class="line">    |</span><br><span class="line">    |</span><br><span class="line">    |--&gt; <span class="function"><span class="keyword">int</span> <span class="title">open_table_from_share</span><span class="params">(THD *thd, TABLE_SHARE *share, <span class="keyword">const</span> <span class="keyword">char</span> *alias,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                              uint db_stat, uint prgflag, uint ha_open_flags,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                              TABLE *outparam, <span class="keyword">bool</span> is_create_table)</span></span></span><br><span class="line">    |        |</span><br><span class="line">    |        |</span><br><span class="line">    |        |--&gt; <span class="function">handler *<span class="title">get_new_handler</span><span class="params">(TABLE_SHARE *share, MEM_ROOT *alloc,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                             handlerton *db_type)</span></span></span><br><span class="line">    |        |</span><br><span class="line">    |        |</span><br><span class="line">    |        |--&gt; <span class="function"><span class="keyword">int</span> <span class="title">handler::ha_open</span><span class="params">(TABLE *table_arg, <span class="keyword">const</span> <span class="keyword">char</span> *name, <span class="keyword">int</span> mode,</span></span></span><br><span class="line"><span class="function"><span class="params">                                       <span class="keyword">int</span> test_if_locked)</span></span></span><br></pre></td></tr></table></figure>
+
+<h3 id="表创建过程"><a href="#表创建过程" class="headerlink" title="表创建过程"></a>表创建过程</h3><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br></pre></td><td class="code"><pre><span class="line">TABLE_LIST *</span><br><span class="line">st_select_lex::add_table_to_list(THD *thd,</span><br><span class="line">                                 Table_ident *table,</span><br><span class="line">                                 LEX_STRING *alias,</span><br><span class="line">                                 ulong table_options,</span><br><span class="line">                                 thr_lock_type lock_type,</span><br><span class="line">                                 enum_mdl_type mdl_type,</span><br><span class="line">                                 List&lt;Index_hint&gt; *index_hints_arg,</span><br><span class="line">                                 List&lt;<span class="keyword">String</span>&gt; *partition_names,</span><br><span class="line">                                 LEX_STRING *option,</span><br><span class="line">                                 Sequence_scan_mode seq_scan_mode)</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">mysql_create_table</span><span class="params">(THD *thd, TABLE_LIST *create_table,</span></span></span><br><span class="line"><span class="function"><span class="params">                        HA_CREATE_INFO *create_info,</span></span></span><br><span class="line"><span class="function"><span class="params">                        Alter_info *alter_info)</span></span></span><br><span class="line">    |</span><br><span class="line">    |</span><br><span class="line">    |--&gt; <span class="function"><span class="keyword">bool</span> <span class="title">mysql_create_table_no_lock</span><span class="params">(THD *thd,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                                   <span class="keyword">const</span> <span class="keyword">char</span> *db, <span class="keyword">const</span> <span class="keyword">char</span> *table_name,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                                   HA_CREATE_INFO *create_info,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                                   Alter_info *alter_info,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                                   uint select_field_count,</span></span></span><br><span class="line"><span class="function"><span class="params">    |                                   <span class="keyword">bool</span> *is_trans)</span></span></span><br><span class="line">    |        |</span><br><span class="line">    |        |</span><br><span class="line">    |        |--&gt; <span class="keyword">static</span></span><br><span class="line">    |        |    <span class="function"><span class="keyword">bool</span> <span class="title">create_table_impl</span><span class="params">(THD *thd,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           <span class="keyword">const</span> <span class="keyword">char</span> *db, <span class="keyword">const</span> <span class="keyword">char</span> *table_name,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           <span class="keyword">const</span> <span class="keyword">char</span> *error_table_name,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           <span class="keyword">const</span> <span class="keyword">char</span> *path,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           HA_CREATE_INFO *create_info,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           Alter_info *alter_info,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           <span class="keyword">bool</span> internal_tmp_table,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           uint select_field_count,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           <span class="keyword">bool</span> no_ha_table,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           <span class="keyword">bool</span> *is_trans,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           KEY **key_info,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |                           uint *key_count)</span></span></span><br><span class="line">    |        |        |</span><br><span class="line">    |        |        |</span><br><span class="line">    |        |        |--&gt; <span class="function"><span class="keyword">int</span> <span class="title">rea_create_table</span><span class="params">(THD *thd, <span class="keyword">const</span> <span class="keyword">char</span> *path,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                         <span class="keyword">const</span> <span class="keyword">char</span> *db, <span class="keyword">const</span> <span class="keyword">char</span> *table_name,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                         HA_CREATE_INFO *create_info,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                         List&lt;Create_field&gt; &amp;create_fields,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                         uint keys, KEY *key_info, handler *file,</span></span></span><br><span class="line"><span class="function"><span class="params">    |        |        |                         <span class="keyword">bool</span> no_ha_table)</span></span></span><br></pre></td></tr></table></figure>
+
+
+
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* create table 过程 */</span></span><br><span class="line"></span><br><span class="line">|--&gt; mysql_create_table</span><br><span class="line">|    |--&gt; open_tables</span><br><span class="line">|    |    |--&gt; open_and_process_table</span><br><span class="line">|    |    |    |--&gt; open_table</span><br><span class="line">|    |    |    |    |--&gt; check_if_table_exists</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; mysql_create_table_no_lock</span><br><span class="line">|    |    |--&gt; create_table_impl</span><br><span class="line">|    |    |    |--&gt; mysql_prepare_create_table</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; rea_create_table</span><br><span class="line">|    |    |    |    |--&gt; mysql_create_frm <span class="comment">// 创建 frm 文件</span></span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; ha_create_table</span><br><span class="line">|    |    |    |    |    |--&gt; open_table_def</span><br><span class="line">|    |    |    |    |    |    |--&gt; mysql_file_open</span><br><span class="line">|    |    |    |    |    |    |--&gt; open_binary_frm</span><br><span class="line">|    |    |    |    |    |    |--&gt; mysql_file_close</span><br><span class="line">|    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |--&gt; open_table_from_share</span><br><span class="line">|    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |--&gt; table.file-&gt;ha_create</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">|--&gt; ha_innobase::create</span><br><span class="line">|    |--&gt; info.prepare_create_table</span><br><span class="line">|    |--&gt; row_mysql_lock_data_dictionary</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; info.create_table</span><br><span class="line">|    |    |--&gt; create_table_def</span><br><span class="line">|    |    |    |--&gt; dict_mem_table_create</span><br><span class="line">|    |    |    |--&gt; row_create_table_for_mysql</span><br><span class="line">|    |    |    |    |--&gt; dict_build_table_def_step</span><br><span class="line">|    |    |    |    |    |--&gt; dict_build_tablespace_for_table</span><br><span class="line">|    |    |    |    |    |    |--&gt; fil_ibd_create <span class="comment">// 创建 ibd 文件</span></span><br><span class="line">|    |    |    |    |    |--&gt; dict_create_sys_tables_tuple</span><br><span class="line">|    |    |    |    |    |--&gt; ins_node_set_new_row <span class="comment">// 插入系统表</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; create_index</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; row_mysql_unlock_data_dictionary</span><br></pre></td></tr></table></figure>
+
+<h2 id="参考文献"><a href="#参考文献" class="headerlink" title="参考文献"></a>参考文献</h2><blockquote>
+<p><a href="http://mysql.taobao.org/monthly/2015/08/10/" target="_blank" rel="noopener">http://mysql.taobao.org/monthly/2015/08/10/</a></p>
+<p><a href="http://liuyangming.tech/10-2019/information_schema-exploration.html" target="_blank" rel="noopener">http://liuyangming.tech/10-2019/information_schema-exploration.html</a></p>
+<p><a href="https://www.cnblogs.com/xpchild/p/3780625.html" target="_blank" rel="noopener">https://www.cnblogs.com/xpchild/p/3780625.html</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/12/05/mysql/atomic-ddl/" rel="prev" title="MySQL Atomic DDL">
+      <i class="fa fa-chevron-left"></i> MySQL Atomic DDL
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/12/05/innodb/space-page/" rel="next" title="InnoDB 物理文件介绍">
+      InnoDB 物理文件介绍 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#基本说明"><span class="nav-number">1.</span> <span class="nav-text">基本说明</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#MySQL-8-0"><span class="nav-number">2.</span> <span class="nav-text">MySQL 8.0</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#MySQL-5-7"><span class="nav-number">3.</span> <span class="nav-text">MySQL 5.7</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#表打开过程"><span class="nav-number">3.1.</span> <span class="nav-text">表打开过程</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#表创建过程"><span class="nav-number">3.2.</span> <span class="nav-text">表创建过程</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考文献"><span class="nav-number">4.</span> <span class="nav-text">参考文献</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="magq1001@gmail.com"
+      src="/images/avatar.jpg">
+  <p class="site-author-name" itemprop="name">magq1001@gmail.com</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">24</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">6</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">8</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">magq1001@gmail.com</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
+  </div>
+
+        
+<div class="busuanzi-count">
+  <script async src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+</div>
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

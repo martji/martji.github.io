@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.2.1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"yoursite.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="Atomic DDL 是 MySQL 8.0 的重要特征之一，关于 Atomic DDL 的介绍文档，流传比较广泛的就是参考文献中提到的两篇文章，文章中对 Atomic DDL 的实现思想和基本过程进行了介绍，建议大家阅读一下。本文尝试对完整的建表&#x2F;删表过程进行分析。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL Atomic DDL">
+<meta property="og:url" content="http://yoursite.com/2020/12/05/mysql/atomic-ddl/index.html">
+<meta property="og:site_name" content="George Ma">
+<meta property="og:description" content="Atomic DDL 是 MySQL 8.0 的重要特征之一，关于 Atomic DDL 的介绍文档，流传比较广泛的就是参考文献中提到的两篇文章，文章中对 Atomic DDL 的实现思想和基本过程进行了介绍，建议大家阅读一下。本文尝试对完整的建表&#x2F;删表过程进行分析。">
+<meta property="og:locale" content="zh_CN">
+<meta property="article:published_time" content="2020-12-05T12:03:12.000Z">
+<meta property="article:modified_time" content="2020-12-05T12:05:16.179Z">
+<meta property="article:author" content="magq1001@gmail.com">
+<meta property="article:tag" content="Feature">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="http://yoursite.com/2020/12/05/mysql/atomic-ddl/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>MySQL Atomic DDL | George Ma</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">George Ma</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+  <a href="https://github.com/martji/martji.github.io" class="github-corner" title="Follow me on GitHub" aria-label="Follow me on GitHub" rel="noopener" target="_blank"><svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://yoursite.com/2020/12/05/mysql/atomic-ddl/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.jpg">
+      <meta itemprop="name" content="magq1001@gmail.com">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="George Ma">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL Atomic DDL
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+              
+
+              <time title="创建时间：2020-12-05 20:03:12 / 修改时间：20:05:16" itemprop="dateCreated datePublished" datetime="2020-12-05T20:03:12+08:00">2020-12-05</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/MySQL/" itemprop="url" rel="index"><span itemprop="name">MySQL</span></a>
+                </span>
+            </span>
+
+          
+            <span class="post-meta-item" title="阅读次数" id="busuanzi_container_page_pv" style="display: none;">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-eye"></i>
+              </span>
+              <span class="post-meta-item-text">阅读次数：</span>
+              <span id="busuanzi_value_page_pv"></span>
+            </span>
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>Atomic DDL 是 MySQL 8.0 的重要特征之一，关于 Atomic DDL 的介绍文档，流传比较广泛的就是参考文献中提到的两篇文章，文章中对 Atomic DDL 的实现思想和基本过程进行了介绍，建议大家阅读一下。本文尝试对完整的建表/删表过程进行分析。</p>
+<a id="more"></a>
+
+<h2 id="建表过程"><a href="#建表过程" class="headerlink" title="建表过程"></a>建表过程</h2><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; mysql_create_table</span><br><span class="line">|    |--&gt; open_tables</span><br><span class="line">|    |    |--&gt; open_and_process_table</span><br><span class="line">|    |    |    |--&gt; open_table  <span class="comment">// 打开表</span></span><br><span class="line">|    |    |    |    |--&gt; check_if_table_exists</span><br><span class="line">|    |    |    |    |    |--&gt; dd::table_exists</span><br><span class="line">|    |    |    |    |    |    |--&gt; client-&gt;acquire <span class="comment">// dd::Abstract_table</span></span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; tc-&gt;get_table  <span class="comment">//  从 Table_cache_manager 查找</span></span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; get_table_share_with_discover  <span class="comment">// 构建 TABLE_SHARE</span></span><br><span class="line">|    |    |    |    |    |--&gt; get_table_share</span><br><span class="line">|    |    |    |    |    |    |--&gt; table_def_cache-&gt;<span class="built_in">find</span>  <span class="comment">// 从 Table_definition_cache 查找</span></span><br><span class="line">|    |    |    |    |    |    |--&gt; process_found_table_share</span><br><span class="line">|    |    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |    |--&gt; alloc_table_share</span><br><span class="line">|    |    |    |    |    |    |--&gt; table_def_cache-&gt;emplace  <span class="comment">// 维护 Table_definition_cache</span></span><br><span class="line">|    |    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |    |--&gt; thd-&gt;dd_client()-&gt;acquire</span><br><span class="line">|    |    |    |    |    |    |--&gt; open_table_def</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; open_table_from_share  <span class="comment">// 通过 TABLE_SHARE 打开 TABLE</span></span><br><span class="line">|    |    |    |    |    |--&gt; ha_open</span><br><span class="line">|    |    |    |    |    |    |--&gt; ha_innobase::<span class="built_in">open</span> <span class="comment">// 打开一个 innodb 表</span></span><br><span class="line">|    |    |    |    |    |    |    |--&gt; lookup_table_handler</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; dict_table_check_if_in_cache_low</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; dd_open_table</span><br><span class="line">|    |    |    |    |    |    |    |    |--&gt; dd_open_table_one</span><br><span class="line">|    |    |    |    |    |    |    |</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; row_create_prebuilt</span><br><span class="line">|    |    |    |    |    |    |    |--&gt; info(...)</span><br><span class="line">|    |    |    |    |    |    |    |    |--&gt; info_low</span><br><span class="line">|    |    |    |    |    |    |    |    |    |--&gt; update_thd</span><br><span class="line">|    |    |    |    |    |    |    |    |    |    |--&gt; row_update_prebuilt_trx</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; tc-&gt;add_used_table  <span class="comment">// 添加到 Table_cache_manager</span></span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; thd-&gt;set_open_tables</span><br><span class="line">|    |    |    |    |--&gt; table-&gt;init</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; mysql_create_table_no_lock</span><br><span class="line">|    |    |--&gt; create_table_impl</span><br><span class="line">|    |    |    |--&gt; check_engine</span><br><span class="line">|    |    |    |--&gt; set_table_default_charset</span><br><span class="line">|    |    |    |--&gt; get_new_handler</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; check_if_table_exists</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; mysql_prepare_create_table</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; rea_create_base_table</span><br><span class="line">|    |    |    |    |--&gt; dd::create_table</span><br><span class="line">|    |    |    |    |    |--&gt; dict-&gt;get_dd_table</span><br><span class="line">|    |    |    |    |    |--&gt; create_dd_user_table</span><br><span class="line">|    |    |    |    |    |--&gt; fill_dd_table_from_create_info</span><br><span class="line">|    |    |    |    |    |    |--&gt; fill_dd_columns_from_create_fields</span><br><span class="line">|    |    |    |    |    |    |--&gt; fill_dd_indexes_from_keyinfo</span><br><span class="line">|    |    |    |    |    |    |--&gt; file-&gt;get_extra_columns_and_keys</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; thd-&gt;dd_client()-&gt;store <span class="comment">// dd::Table</span></span><br><span class="line">|    |    |    |    |--&gt; thd-&gt;dd_client()-&gt;acquire_for_modification</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; ha_create_table</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; trans_commit_stmt</span><br><span class="line">|    |--&gt; trans_commit_implicit</span><br><span class="line">|    |    |--&gt; thd-&gt;dd_client()-&gt;commit_modified_objects</span><br><span class="line">|    |    |    |--&gt; remove_uncommitted_objects <span class="comment">// dd::Abstract_table + dd::Tablespace</span></span><br><span class="line">|    |    |    |    |--&gt; invalidate</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; trans_rollback_stmt</span><br><span class="line">|    |--&gt; trans_rollback</span><br><span class="line">|    |    |--&gt; thd-&gt;dd_client()-&gt;rollback_modified_objects</span><br><span class="line">|    |    |    |--&gt; remove_uncommitted_objects</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; post_ddl</span><br></pre></td></tr></table></figure>
+
+
+
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; create_impl</span><br><span class="line">|    |--&gt; create_table</span><br><span class="line">|    |    |--&gt; create_table_def</span><br><span class="line">|    |    |    |--&gt; dict_mem_table_create</span><br><span class="line">|    |    |    |--&gt; row_create_table_for_mysql</span><br><span class="line">|    |    |    |    |--&gt; dict_build_table_def</span><br><span class="line">|    |    |    |    |    |--&gt; dict_build_table_space_for_table</span><br><span class="line">|    |    |    |    |    |    |--&gt; log_ddl-&gt;write_delete_space_log</span><br><span class="line">|    |    |    |    |    |    |--&gt; fil_ibd_create</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; dict_table_add_system_columns</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; dict_table_add_to_cache</span><br><span class="line">|    |    |    |    |--&gt; log_ddl-&gt;write_remove_cache_log</span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; create_index</span><br><span class="line">|    |    |    |--&gt; dict_mem_index_create</span><br><span class="line">|    |    |    |--&gt; row_create_index_for_mysql</span><br><span class="line">|    |    |    |    |--&gt; dict_build_index_def</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; dict_index_add_to_cache_w_vcol</span><br><span class="line">|    |    |    |    |    |--&gt; dict_index_build_internal_clust</span><br><span class="line">|    |    |    |    |    |--&gt; dict_index_build_internal_non_clust</span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; dict_create_index_tree_in_mem</span><br><span class="line">|    |    |    |    |    |--&gt; btr_create</span><br><span class="line">|    |    |    |    |    |--&gt; log_ddl-&gt;write_free_tree_log</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; create_table_update_global_dd</span><br><span class="line">|    |    |--&gt; dd_create_implicit_tablespace</span><br><span class="line">|    |    |    |--&gt; dd_create_tablespace</span><br><span class="line">|    |    |    |    |--&gt; dd_client-&gt;store <span class="comment">// dd::Tablespace</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; create_table_update_dict</span><br></pre></td></tr></table></figure>
+
+
+
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/* Dictionary_client 操作 */</span></span><br><span class="line"></span><br><span class="line">|--&gt; acquire</span><br><span class="line">|    |--&gt; acquire_uncommitted</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; m_registry_committed.<span class="built_in">get</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; Shared_dictionary_cache::instance()-&gt;<span class="built_in">get</span></span><br><span class="line">|    |    |--&gt; m_map&lt;T&gt;()-&gt;<span class="built_in">get</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; get_uncached</span><br><span class="line">|    |    |    |--&gt; Storage_adapter::<span class="built_in">get</span></span><br><span class="line">|    |    |    |    |--&gt; instance()-&gt;core_get</span><br><span class="line">|    |    |    |    |    |--&gt; m_core_registry.<span class="built_in">get</span></span><br><span class="line">|    |    |    |    |</span><br><span class="line">|    |    |    |    |--&gt; trx.otx.get_table <span class="comment">// 从系统表读取</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; m_map&lt;T&gt;()-&gt;<span class="built_in">put</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; m_registry_committed.<span class="built_in">put</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">|--&gt; store</span><br><span class="line">|    |--&gt; m_registry_committed.<span class="built_in">get</span> <span class="comment">// 检查</span></span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; Storage_adapter::store <span class="comment">// 保存</span></span><br><span class="line">|    |    |--&gt; instance()-&gt;core_store</span><br><span class="line">|    |    |    |--&gt; m_core_registry.<span class="built_in">put</span></span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; object-&gt;impl()-&gt;store <span class="comment">// 保存到系统表</span></span><br><span class="line">|    |    |--&gt; sdi::store</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; register_uncommitted_object</span><br><span class="line">|    |    |--&gt; m_registry_committed.<span class="built_in">get</span></span><br><span class="line">|    |    |--&gt; m_registry_dropped.<span class="built_in">get</span></span><br><span class="line">|    |    |--&gt; m_registry_uncommitted.<span class="built_in">put</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="删表过程"><a href="#删表过程" class="headerlink" title="删表过程"></a>删表过程</h2><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; mysql_rm_table</span><br><span class="line">|    |--&gt; mysql_rm_table_no_locks</span><br><span class="line">|    |    |--&gt; drop_base_table</span><br><span class="line">|    |    |    |--&gt; ha_delete_table</span><br><span class="line">|    |    |    |</span><br><span class="line">|    |    |    |--&gt; dd::drop_table</span><br><span class="line">|    |    |</span><br><span class="line">|    |    |--&gt; post_ddl</span><br></pre></td></tr></table></figure>
+
+
+
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">|--&gt; delete_impl</span><br><span class="line">|    |--&gt; row_drop_table_for_mysql</span><br><span class="line">|    |    |--&gt; row_drop_table_from_cache</span><br><span class="line">|    |    |--&gt; log_ddl-&gt;write_drop_log</span><br><span class="line">|    |    |--&gt; log_ddl-&gt;write_delete_space_log</span><br><span class="line">|    |</span><br><span class="line">|    |--&gt; dd_drop_tablespace</span><br></pre></td></tr></table></figure>
+
+<h2 id="参考文献"><a href="#参考文献" class="headerlink" title="参考文献"></a>参考文献</h2><blockquote>
+<p><a href="http://mysql.taobao.org/monthly/2018/03/02/" target="_blank" rel="noopener">http://mysql.taobao.org/monthly/2018/03/02/</a></p>
+<p><a href="http://mysql.taobao.org/monthly/2018/07/02/" target="_blank" rel="noopener">http://mysql.taobao.org/monthly/2018/07/02/</a></p>
+</blockquote>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/Feature/" rel="tag"># Feature</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/12/05/mysql/transaction-commit/" rel="prev" title="MySQL 事务提交过程">
+      <i class="fa fa-chevron-left"></i> MySQL 事务提交过程
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/12/05/mysql/table-object/" rel="next" title="MySQL 中的 TABLE 对象">
+      MySQL 中的 TABLE 对象 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#建表过程"><span class="nav-number">1.</span> <span class="nav-text">建表过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#删表过程"><span class="nav-number">2.</span> <span class="nav-text">删表过程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#参考文献"><span class="nav-number">3.</span> <span class="nav-text">参考文献</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="magq1001@gmail.com"
+      src="/images/avatar.jpg">
+  <p class="site-author-name" itemprop="name">magq1001@gmail.com</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">24</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">6</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">8</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">magq1001@gmail.com</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
+  </div>
+
+        
+<div class="busuanzi-count">
+  <script async src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+</div>
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>

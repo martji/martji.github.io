@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 4.2.1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"yoursite.com","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":true,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="本文结合 MySQL 8.0 的源码对 MySQL 的连接处理过程进行一个介绍，其它版本与 8.0 版本基本类似。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="MySQL 建连过程分析">
+<meta property="og:url" content="http://yoursite.com/2020/07/15/mysql/connection-handler/index.html">
+<meta property="og:site_name" content="George Ma">
+<meta property="og:description" content="本文结合 MySQL 8.0 的源码对 MySQL 的连接处理过程进行一个介绍，其它版本与 8.0 版本基本类似。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="http://yoursite.com/images/connection-handler-1.jpg">
+<meta property="article:published_time" content="2020-07-15T14:09:20.000Z">
+<meta property="article:modified_time" content="2020-12-05T12:02:28.618Z">
+<meta property="article:author" content="magq1001@gmail.com">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http://yoursite.com/images/connection-handler-1.jpg">
+
+<link rel="canonical" href="http://yoursite.com/2020/07/15/mysql/connection-handler/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>MySQL 建连过程分析 | George Ma</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">George Ma</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+  <a href="https://github.com/martji/martji.github.io" class="github-corner" title="Follow me on GitHub" aria-label="Follow me on GitHub" rel="noopener" target="_blank"><svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="http://yoursite.com/2020/07/15/mysql/connection-handler/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.jpg">
+      <meta itemprop="name" content="magq1001@gmail.com">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="George Ma">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          MySQL 建连过程分析
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+
+              <time title="创建时间：2020-07-15 22:09:20" itemprop="dateCreated datePublished" datetime="2020-07-15T22:09:20+08:00">2020-07-15</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">更新于</span>
+                <time title="修改时间：2020-12-05 20:02:28" itemprop="dateModified" datetime="2020-12-05T20:02:28+08:00">2020-12-05</time>
+              </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/MySQL/" itemprop="url" rel="index"><span itemprop="name">MySQL</span></a>
+                </span>
+            </span>
+
+          
+            <span class="post-meta-item" title="阅读次数" id="busuanzi_container_page_pv" style="display: none;">
+              <span class="post-meta-item-icon">
+                <i class="fa fa-eye"></i>
+              </span>
+              <span class="post-meta-item-text">阅读次数：</span>
+              <span id="busuanzi_value_page_pv"></span>
+            </span>
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <p>本文结合 MySQL 8.0 的源码对 MySQL 的连接处理过程进行一个介绍，其它版本与 8.0 版本基本类似。</p>
+<a id="more"></a>
+
+<h2 id="数据结构"><a href="#数据结构" class="headerlink" title="数据结构"></a>数据结构</h2><p>在介绍 MySQL 建连过程之前，先整体看一下相关类的关系：</p>
+<img src="/images/connection-handler-1.jpg" width="88%"/>
+
+<p>MySQL 8.0 在 Linux 平台下使用的是 poll 机制，默认情况下每个用户连接会使用一个单独的线程进行处理。</p>
+<h2 id="MySQL-建连过程"><a href="#MySQL-建连过程" class="headerlink" title="MySQL 建连过程"></a>MySQL 建连过程</h2><p>MySQL 建连过程可以分为以下几个步骤：</p>
+<h3 id="初始化"><a href="#初始化" class="headerlink" title="初始化"></a>初始化</h3><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">static</span> Connection_acceptor&lt;Mysqld_socket_listener&gt; *mysqld_socket_acceptor = <span class="literal">NULL</span>;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">bool</span> <span class="title">network_init</span><span class="params">(<span class="keyword">void</span>)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  <span class="comment">/* 解析网络配置信息 */</span></span><br><span class="line">  Mysqld_socket_listener *mysqld_socket_listener = <span class="keyword">new</span> (<span class="built_in">std</span>::nothrow)</span><br><span class="line">      Mysqld_socket_listener(bind_addresses_info, mysqld_port,</span><br><span class="line">                             admin_address_info, mysqld_admin_port,</span><br><span class="line">                             listen_admin_interface_in_separate_thread,</span><br><span class="line">                             back_log, mysqld_port_timeout, unix_sock_name);</span><br><span class="line"></span><br><span class="line">  mysqld_socket_acceptor = <span class="keyword">new</span> (<span class="built_in">std</span>::nothrow)</span><br><span class="line">      Connection_acceptor&lt;Mysqld_socket_listener&gt;(mysqld_socket_listener);</span><br><span class="line">  ...</span><br><span class="line">  <span class="comment">/* 初始化监听端口 */</span></span><br><span class="line">  <span class="keyword">if</span> (mysqld_socket_acceptor-&gt;init_connection_acceptor())</span><br><span class="line">    <span class="keyword">return</span> <span class="literal">true</span>;</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">init_connection_acceptor</span><span class="params">()</span> </span>&#123; <span class="keyword">return</span> m_listener-&gt;setup_listener(); &#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">Mysqld_socket_listener::setup_listener</span><span class="params">()</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  <span class="keyword">if</span> (m_tcp_port) &#123;</span><br><span class="line">    <span class="keyword">for</span> (<span class="keyword">const</span> <span class="keyword">auto</span> &amp;bind_address_info : m_bind_addresses) &#123;</span><br><span class="line">      <span class="function">TCP_socket <span class="title">tcp_socket</span><span class="params">(bind_address_info.address,</span></span></span><br><span class="line"><span class="function"><span class="params">                            bind_address_info.network_namespace, m_tcp_port,</span></span></span><br><span class="line"><span class="function"><span class="params">                            m_backlog, m_port_timeout)</span></span>;</span><br><span class="line"></span><br><span class="line">      <span class="comment">/* socket 初始化，底层调用的还是 socket/bind/listen 函数 */</span></span><br><span class="line">      MYSQL_SOCKET mysql_socket = tcp_socket.get_listener_socket();</span><br><span class="line">      <span class="keyword">if</span> (mysql_socket.fd == INVALID_SOCKET) <span class="keyword">return</span> <span class="literal">true</span>;</span><br><span class="line"></span><br><span class="line">      <span class="function">Socket_attr <span class="title">s</span><span class="params">(Socket_type::TCP_SOCKET,</span></span></span><br><span class="line"><span class="function"><span class="params">                    bind_address_info.network_namespace)</span></span>;</span><br><span class="line">      m_socket_map.insert(</span><br><span class="line">          <span class="built_in">std</span>::pair&lt;MYSQL_SOCKET, Socket_attr&gt;(mysql_socket, s));</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  <span class="comment">/* 将所有监听的 socket 信息加入到 m_poll_info 中 */</span></span><br><span class="line">  setup_connection_events(m_socket_map);</span><br><span class="line">  <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">/* socker 初始化 */</span></span><br><span class="line"><span class="function">MYSQL_SOCKET <span class="title">TCP_socket::get_listener_socket</span><span class="params">()</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  MYSQL_SOCKET listener_socket = create_socket(ai_ptr.<span class="built_in">get</span>(), AF_INET, &amp;a);</span><br><span class="line">  mysql_socket_bind(listener_socket, a-&gt;ai_addr, a-&gt;ai_addrlen);</span><br><span class="line">  mysql_socket_listen(listener_socket, <span class="keyword">static_cast</span>&lt;<span class="keyword">int</span>&gt;(m_backlog);</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">void</span> Mysqld_socket_listener::setup_connection_events(</span><br><span class="line">    <span class="keyword">const</span> <span class="keyword">socket_map_t</span> &amp;socket_map) &#123;</span><br><span class="line">#ifdef HAVE_POLL</span><br><span class="line">  <span class="keyword">const</span> <span class="keyword">socket_map_t</span>::size_type total_number_of_addresses_to_bind =</span><br><span class="line">      socket_map.<span class="built_in">size</span>();</span><br><span class="line">  m_poll_info.m_fds.reserve(total_number_of_addresses_to_bind);</span><br><span class="line">  m_poll_info.m_pfs_fds.reserve(total_number_of_addresses_to_bind);</span><br><span class="line">#endif</span><br><span class="line"></span><br><span class="line">  <span class="keyword">for</span> (<span class="keyword">const</span> <span class="keyword">auto</span> &amp;element : socket_map) add_socket_to_listener(element.first);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">void</span> Mysqld_socket_listener::add_socket_to_listener(</span><br><span class="line">    MYSQL_SOCKET listen_socket) &#123;</span><br><span class="line">  mysql_socket_set_thread_owner(listen_socket);</span><br><span class="line"></span><br><span class="line">#ifdef HAVE_POLL</span><br><span class="line">  m_poll_info.m_fds.emplace_back(</span><br><span class="line">      pollfd&#123;mysql_socket_getfd(listen_socket), POLLIN, <span class="number">0</span>&#125;);</span><br><span class="line">  m_poll_info.m_pfs_fds.push_back(listen_socket);</span><br><span class="line">#<span class="keyword">else</span></span><br><span class="line">  FD_SET(mysql_socket_getfd(listen_socket), &amp;m_select_info.m_client_fds);</span><br><span class="line">  <span class="keyword">if</span> ((uint)mysql_socket_getfd(listen_socket) &gt;</span><br><span class="line">      m_select_info.m_max_used_connection)</span><br><span class="line">    m_select_info.m_max_used_connection = mysql_socket_getfd(listen_socket);</span><br><span class="line">#endif</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="连接建立"><a href="#连接建立" class="headerlink" title="连接建立"></a>连接建立</h3><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">int</span> <span class="title">mysqld_main</span><span class="params">(<span class="keyword">int</span> argc, <span class="keyword">char</span> **argv)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  mysqld_socket_acceptor-&gt;connection_event_loop();</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">connection_event_loop</span><span class="params">()</span> </span>&#123;</span><br><span class="line">  Connection_handler_manager *mgr =</span><br><span class="line">    Connection_handler_manager::get_instance();</span><br><span class="line">  <span class="keyword">while</span> (!connection_events_loop_aborted()) &#123;</span><br><span class="line">    <span class="comment">/* 监听到连接事件，开始 channel 处理 */</span></span><br><span class="line">    Channel_info *channel_info = m_listener-&gt;listen_for_connection_event();</span><br><span class="line">    <span class="keyword">if</span> (channel_info != <span class="literal">NULL</span>) mgr-&gt;process_new_connection(channel_info);</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function">Channel_info *<span class="title">Mysqld_socket_listener::listen_for_connection_event</span><span class="params">()</span> </span>&#123;</span><br><span class="line"><span class="meta">#<span class="meta-keyword">ifdef</span> HAVE_POLL</span></span><br><span class="line">  <span class="comment">/* 通过 poll 机制进行监听 */</span></span><br><span class="line">  <span class="keyword">int</span> retval = poll(&amp;m_poll_info.m_fds[<span class="number">0</span>], m_socket_map.<span class="built_in">size</span>(), <span class="number">-1</span>);</span><br><span class="line"><span class="meta">#<span class="meta-keyword">else</span></span></span><br><span class="line">  m_select_info.m_read_fds = m_select_info.m_client_fds;</span><br><span class="line">  <span class="keyword">int</span> retval = select((<span class="keyword">int</span>)m_select_info.m_max_used_connection,</span><br><span class="line">                      &amp;m_select_info.m_read_fds, <span class="number">0</span>, <span class="number">0</span>, <span class="number">0</span>);</span><br><span class="line"><span class="meta">#<span class="meta-keyword">endif</span></span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">bool</span> is_unix_socket = <span class="literal">false</span>, is_admin_sock;</span><br><span class="line">  <span class="comment">/* 获取到一个 ready 的 socket */</span></span><br><span class="line">  MYSQL_SOCKET listen_sock = get_ready_socket(&amp;is_unix_socket, &amp;is_admin_sock);</span><br><span class="line">  DBUG_ASSERT(mysql_socket_getfd(listen_sock) != INVALID_SOCKET);</span><br><span class="line">  </span><br><span class="line">  MYSQL_SOCKET connect_sock;</span><br><span class="line">  accept_connection(listen_sock, &amp;connect_sock);</span><br><span class="line"></span><br><span class="line">  Channel_info *channel_info = <span class="literal">NULL</span>;</span><br><span class="line">  <span class="keyword">if</span> (is_unix_socket)</span><br><span class="line">    channel_info = <span class="keyword">new</span> (<span class="built_in">std</span>::nothrow) Channel_info_local_socket(connect_sock);</span><br><span class="line">  <span class="keyword">else</span></span><br><span class="line">    channel_info = <span class="keyword">new</span> (<span class="built_in">std</span>::nothrow)</span><br><span class="line">        Channel_info_tcpip_socket(connect_sock, is_admin_sock);</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">void</span> <span class="title">Connection_handler_manager::process_new_connection</span><span class="params">(</span></span></span><br><span class="line"><span class="function"><span class="params">    Channel_info *channel_info)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  <span class="keyword">if</span> (m_connection_handler-&gt;add_connection(channel_info)) &#123;</span><br><span class="line">    inc_aborted_connects();</span><br><span class="line">    <span class="keyword">delete</span> channel_info;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">/* 一对一处理模式 */</span></span><br><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">Per_thread_connection_handler::add_connection</span><span class="params">(Channel_info *channel_info)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  <span class="comment">/* 检查是否有空闲的线程 */</span></span><br><span class="line">  <span class="keyword">if</span> (!check_idle_thread_and_enqueue_connection(channel_info)) <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">  </span><br><span class="line">  channel_info-&gt;set_prior_thr_create_utime();</span><br><span class="line">  <span class="comment">/* 新建一个线程进行处理 */</span></span><br><span class="line">  error =</span><br><span class="line">      mysql_thread_create(key_thread_one_connection, &amp;id, &amp;connection_attrib,</span><br><span class="line">                          handle_connection, (<span class="keyword">void</span> *)channel_info);</span><br><span class="line">  ...</span><br><span class="line">  <span class="keyword">if</span> (error) &#123;</span><br><span class="line">    connection_errors_internal++;</span><br><span class="line">    <span class="keyword">if</span> (!create_thd_err_log_throttle.<span class="built_in">log</span>())</span><br><span class="line">      LogErr(ERROR_LEVEL, ER_CONN_PER_THREAD_NO_THREAD, error);</span><br><span class="line">    channel_info-&gt;send_error_and_close_channel(ER_CANT_CREATE_THREAD, error,</span><br><span class="line">                                               <span class="literal">true</span>);</span><br><span class="line"></span><br><span class="line">    im::global_manager_dec_connection(<span class="literal">NULL</span>);</span><br><span class="line">    <span class="keyword">return</span> <span class="literal">true</span>;</span><br><span class="line">  &#125;</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">static</span> <span class="keyword">void</span> *<span class="title">handle_connection</span><span class="params">(<span class="keyword">void</span> *arg)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  Channel_info *channel_info = <span class="keyword">static_cast</span>&lt;Channel_info *&gt;(arg);</span><br><span class="line">  <span class="keyword">if</span> (my_thread_init()) &#123;</span><br><span class="line">    ...</span><br><span class="line">  &#125;</span><br><span class="line">  ...</span><br><span class="line">  <span class="keyword">for</span> (;;) &#123;</span><br><span class="line">    THD *thd = init_new_thd(channel_info);</span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">while</span> (thd_connection_alive(thd)) &#123;</span><br><span class="line">      <span class="comment">/* 开始请求处理 */</span></span><br><span class="line">      <span class="keyword">if</span> (do_command(thd)) <span class="keyword">break</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    ...</span><br><span class="line">    <span class="comment">/* thread 复用 */</span></span><br><span class="line">    channel_info = Per_thread_connection_handler::block_until_new_connection();</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="请求处理"><a href="#请求处理" class="headerlink" title="请求处理"></a>请求处理</h3><figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">do_command</span><span class="params">(THD *thd,</span></span></span><br><span class="line"><span class="function"><span class="params">                <span class="built_in">std</span>::function&lt;<span class="keyword">bool</span>(THD *, <span class="keyword">const</span> COM_DATA *,</span></span></span><br><span class="line"><span class="function"><span class="params">                                   <span class="keyword">enum</span> enum_server_command)&gt; *dispatcher)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  thd-&gt;m_server_idle = <span class="literal">true</span>;</span><br><span class="line">  rc = thd-&gt;get_protocol()-&gt;get_command(&amp;com_data, &amp;command);</span><br><span class="line">  thd-&gt;m_server_idle = <span class="literal">false</span>;</span><br><span class="line">  ...</span><br><span class="line">  return_value = dispatch_command(thd, &amp;com_data, command);</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">bool</span> <span class="title">dispatch_command</span><span class="params">(THD *thd, <span class="keyword">const</span> COM_DATA *com_data,</span></span></span><br><span class="line"><span class="function"><span class="params">                      <span class="keyword">enum</span> enum_server_command command)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  thd-&gt;set_command(command);</span><br><span class="line">  ...</span><br><span class="line">  <span class="keyword">switch</span> (command) &#123;</span><br><span class="line">    ...</span><br><span class="line">    <span class="keyword">case</span> COM_QUERY: &#123;...&#125;</span><br><span class="line">    ...</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="附"><a href="#附" class="headerlink" title="附"></a>附</h2><p>MySQL 5.7 可以参考：<a href="http://mysql.taobao.org/monthly/2016/07/04/" target="_blank" rel="noopener">http://mysql.taobao.org/monthly/2016/07/04/</a></p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2020/07/13/database/transaction-intro/" rel="prev" title="初识事务">
+      <i class="fa fa-chevron-left"></i> 初识事务
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2020/07/17/mysql/x-plugin/" rel="next" title="MySQL X Plugin">
+      MySQL X Plugin <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#数据结构"><span class="nav-number">1.</span> <span class="nav-text">数据结构</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#MySQL-建连过程"><span class="nav-number">2.</span> <span class="nav-text">MySQL 建连过程</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#初始化"><span class="nav-number">2.1.</span> <span class="nav-text">初始化</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#连接建立"><span class="nav-number">2.2.</span> <span class="nav-text">连接建立</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#请求处理"><span class="nav-number">2.3.</span> <span class="nav-text">请求处理</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#附"><span class="nav-number">3.</span> <span class="nav-text">附</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="magq1001@gmail.com"
+      src="/images/avatar.jpg">
+  <p class="site-author-name" itemprop="name">magq1001@gmail.com</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">24</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">6</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">8</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">magq1001@gmail.com</span>
+</div>
+  <div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Gemini</a> 强力驱动
+  </div>
+
+        
+<div class="busuanzi-count">
+  <script async src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+</div>
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="//cdn.jsdelivr.net/gh/fancyapps/fancybox@3/dist/jquery.fancybox.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
